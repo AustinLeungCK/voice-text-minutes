@@ -1,0 +1,7 @@
+venv/
+__pycache__/
+*.pyc
+*.wav
+meeting_minutes.md
+meeting_minutes_transcript.txt
+.env
