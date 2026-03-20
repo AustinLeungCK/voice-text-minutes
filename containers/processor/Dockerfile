@@ -13,12 +13,14 @@ RUN ln -sf /usr/bin/python3.11 /usr/bin/python3
 
 WORKDIR /app
 
+# PyTorch with CUDA 12.1 (must be separate to use --index-url)
+RUN pip3 install --no-cache-dir torch==2.4.0 --index-url https://download.pytorch.org/whl/cu121
+
 # Python dependencies
 RUN pip3 install --no-cache-dir \
     faster-whisper==1.1.0 \
     pyannote.audio==3.3.2 \
     soundfile==0.12.1 \
-    torch==2.4.0 --index-url https://download.pytorch.org/whl/cu121 \
     transformers==4.45.0 \
     tiktoken \
     boto3
