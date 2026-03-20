@@ -1,0 +1,206 @@
+{
+  "Comment": "Meeting minutes processing pipeline",
+  "StartAt": "GetJobDetails",
+  "States": {
+    "GetJobDetails": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::dynamodb:getItem",
+      "Parameters": {
+        "TableName": "${JobsTable}",
+        "Key": {
+          "job_id": {
+            "S.$": "$.job_id"
+          }
+        }
+      },
+      "ResultPath": "$.jobDetails",
+      "Next": "UpdateStatusProcessing"
+    },
+    "UpdateStatusProcessing": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::dynamodb:updateItem",
+      "Parameters": {
+        "TableName": "${JobsTable}",
+        "Key": {
+          "job_id": {
+            "S.$": "$.job_id"
+          }
+        },
+        "UpdateExpression": "SET #s = :status",
+        "ExpressionAttributeNames": {
+          "#s": "status"
+        },
+        "ExpressionAttributeValues": {
+          ":status": {
+            "S": "processing"
+          }
+        }
+      },
+      "ResultPath": null,
+      "Next": "RunProcessor"
+    },
+    "RunProcessor": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::batch:submitJob.sync",
+      "Parameters": {
+        "JobName.$": "States.Format('processor-{}', $.job_id)",
+        "JobDefinition": "${ProcessorJobDefinition}",
+        "JobQueue": "${ProcessorJobQueue}",
+        "ContainerOverrides": {
+          "Environment": [
+            {
+              "Name": "JOB_ID",
+              "Value.$": "$.job_id"
+            },
+            {
+              "Name": "S3_BUCKET",
+              "Value": "${DataBucket}"
+            }
+          ]
+        }
+      },
+      "ResultPath": "$.batchResult",
+      "Next": "MergeTranscript",
+      "Retry": [
+        {
+          "ErrorEquals": ["Batch.ServerException"],
+          "IntervalSeconds": 60,
+          "MaxAttempts": 2,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "NotifyFailure",
+          "ResultPath": "$.error"
+        }
+      ]
+    },
+    "MergeTranscript": {
+      "Type": "Task",
+      "Resource": "${MergeTranscriptFunctionArn}",
+      "Parameters": {
+        "job_id.$": "$.job_id",
+        "s3_bucket": "${DataBucket}"
+      },
+      "ResultPath": "$.mergeResult",
+      "Next": "Summarize",
+      "Retry": [
+        {
+          "ErrorEquals": ["States.TaskFailed"],
+          "IntervalSeconds": 5,
+          "MaxAttempts": 2,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "NotifyFailure",
+          "ResultPath": "$.error"
+        }
+      ]
+    },
+    "Summarize": {
+      "Type": "Task",
+      "Resource": "${SummarizeFunctionArn}",
+      "Parameters": {
+        "job_id.$": "$.job_id",
+        "s3_bucket": "${DataBucket}",
+        "requirements.$": "$.jobDetails.Item.requirements.M"
+      },
+      "ResultPath": "$.summarizeResult",
+      "TimeoutSeconds": 900,
+      "Next": "Notify",
+      "Retry": [
+        {
+          "ErrorEquals": ["States.TaskFailed"],
+          "IntervalSeconds": 30,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "NotifyFailure",
+          "ResultPath": "$.error"
+        }
+      ]
+    },
+    "Notify": {
+      "Type": "Task",
+      "Resource": "${NotifyFunctionArn}",
+      "Parameters": {
+        "job_id.$": "$.job_id",
+        "s3_bucket": "${DataBucket}",
+        "email.$": "$.jobDetails.Item.email.S",
+        "status": "completed"
+      },
+      "Next": "UpdateStatusCompleted"
+    },
+    "UpdateStatusCompleted": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::dynamodb:updateItem",
+      "Parameters": {
+        "TableName": "${JobsTable}",
+        "Key": {
+          "job_id": {
+            "S.$": "$.job_id"
+          }
+        },
+        "UpdateExpression": "SET #s = :status, completed_at = :completed_at",
+        "ExpressionAttributeNames": {
+          "#s": "status"
+        },
+        "ExpressionAttributeValues": {
+          ":status": {
+            "S": "completed"
+          },
+          ":completed_at": {
+            "S.$": "$$.State.EnteredTime"
+          }
+        }
+      },
+      "End": true
+    },
+    "NotifyFailure": {
+      "Type": "Task",
+      "Resource": "${NotifyFunctionArn}",
+      "Parameters": {
+        "job_id.$": "$.job_id",
+        "s3_bucket": "${DataBucket}",
+        "email.$": "$.jobDetails.Item.email.S",
+        "status": "failed",
+        "error.$": "$.error"
+      },
+      "Next": "UpdateStatusFailed"
+    },
+    "UpdateStatusFailed": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::dynamodb:updateItem",
+      "Parameters": {
+        "TableName": "${JobsTable}",
+        "Key": {
+          "job_id": {
+            "S.$": "$.job_id"
+          }
+        },
+        "UpdateExpression": "SET #s = :status, error_message = :error",
+        "ExpressionAttributeNames": {
+          "#s": "status"
+        },
+        "ExpressionAttributeValues": {
+          ":status": {
+            "S": "failed"
+          },
+          ":error": {
+            "S.$": "States.JsonToString($.error)"
+          }
+        }
+      },
+      "End": true
+    }
+  }
+}

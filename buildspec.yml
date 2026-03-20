@@ -1,0 +1,58 @@
+version: 0.2
+
+env:
+  variables:
+    ECR_REPO: prod-voice-meeting-minutes-processor
+    AWS_DEFAULT_REGION: ap-east-1
+  secrets-manager:
+    HF_TOKEN: prod-voice-meeting-minutes/hf-token:HF_TOKEN
+
+phases:
+  pre_build:
+    commands:
+      - echo Logging in to Amazon ECR...
+      - ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+      - ECR_URI="${ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com/${ECR_REPO}"
+      - aws ecr get-login-password --region ${AWS_DEFAULT_REGION} | docker login --username AWS --password-stdin ${ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com
+      - IMAGE_TAG=$(date +%Y%m%d-%H%M%S)
+
+  build:
+    commands:
+      - echo Building Docker image...
+      - cd containers/processor
+      - docker build --build-arg HF_TOKEN=${HF_TOKEN} -t ${ECR_REPO}:${IMAGE_TAG} -t ${ECR_REPO}:latest .
+
+  post_build:
+    commands:
+      - echo Pushing to ECR...
+      - docker tag ${ECR_REPO}:${IMAGE_TAG} ${ECR_URI}:${IMAGE_TAG}
+      - docker tag ${ECR_REPO}:latest ${ECR_URI}:latest
+      - docker push ${ECR_URI}:${IMAGE_TAG}
+      - docker push ${ECR_URI}:latest
+      - echo Updating Batch job definition...
+      - |
+        aws batch register-job-definition \
+          --job-definition-name prod-voice-meeting-minutes-processor \
+          --type container \
+          --container-properties "{
+            \"image\": \"${ECR_URI}:${IMAGE_TAG}\",
+            \"resourceRequirements\": [
+              {\"type\": \"VCPU\", \"value\": \"4\"},
+              {\"type\": \"MEMORY\", \"value\": \"15000\"},
+              {\"type\": \"GPU\", \"value\": \"1\"}
+            ],
+            \"jobRoleArn\": \"arn:aws:iam::${ACCOUNT_ID}:role/prod-voice-meeting-minutes-batch-job-role\",
+            \"executionRoleArn\": \"arn:aws:iam::${ACCOUNT_ID}:role/prod-voice-meeting-minutes-batch-job-role\",
+            \"logConfiguration\": {
+              \"logDriver\": \"awslogs\",
+              \"options\": {
+                \"awslogs-group\": \"/aws/batch/prod-voice-meeting-minutes-processor\",
+                \"awslogs-region\": \"${AWS_DEFAULT_REGION}\",
+                \"awslogs-stream-prefix\": \"processor\"
+              }
+            }
+          }" \
+          --retry-strategy attempts=2 \
+          --timeout attemptDurationSeconds=1800 \
+          --tags Project=voice-meeting-minutes,ManagedBy="AWS SAM",Env=PROD,created-by=austin.leung@ecloudvalley.com
+      - echo "Done! Image: ${ECR_URI}:${IMAGE_TAG}"

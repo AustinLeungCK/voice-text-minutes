@@ -1,0 +1,166 @@
+import json
+import os
+
+import boto3
+
+s3_client = boto3.client("s3")
+dynamodb = boto3.resource("dynamodb")
+bedrock = boto3.client("bedrock-runtime", region_name=os.environ.get("BEDROCK_REGION", "ap-southeast-1"))
+
+JOBS_TABLE = os.environ["JOBS_TABLE"]
+
+# DeepSeek V3.2 context is 164K tokens. Most 1-hour meetings produce
+# 50K-80K tokens, so chunking is rarely needed.
+MAX_TRANSCRIPT_CHARS = 400_000  # ~100K tokens, safe for 164K context
+CHUNK_SIZE_CHARS = 200_000
+
+
+def lambda_handler(event, context):
+    job_id = event["job_id"]
+    bucket = event["s3_bucket"]
+    requirements = _parse_requirements(event.get("requirements", {}))
+
+    # Read merged transcript
+    prefix = f"jobs/{job_id}"
+    resp = s3_client.get_object(Bucket=bucket, Key=f"{prefix}/merged_transcript.txt")
+    transcript = resp["Body"].read().decode("utf-8")
+
+    system_prompt = _build_system_prompt(requirements)
+
+    if len(transcript) <= MAX_TRANSCRIPT_CHARS:
+        minutes = _call_deepseek(system_prompt, transcript)
+    else:
+        minutes = _chunked_summarize(system_prompt, transcript, requirements)
+
+    s3_client.put_object(
+        Bucket=bucket,
+        Key=f"{prefix}/meeting_minutes.md",
+        Body=minutes.encode("utf-8"),
+        ContentType="text/markdown; charset=utf-8",
+    )
+
+    return {
+        "status": "summarized",
+        "s3_key": f"{prefix}/meeting_minutes.md",
+        "length": len(minutes),
+    }
+
+
+def _parse_requirements(req):
+    """Parse DynamoDB map format or plain dict."""
+    if not req:
+        return {
+            "output_language": "繁體中文",
+            "summary_length": "medium",
+            "output_format": "minutes",
+            "custom_instructions": "",
+        }
+    parsed = {}
+    for key, val in req.items():
+        if isinstance(val, dict) and "S" in val:
+            parsed[key] = val["S"]
+        else:
+            parsed[key] = val
+    return parsed
+
+
+def _build_system_prompt(req):
+    lang = req.get("output_language", "繁體中文")
+    length = req.get("summary_length", "medium")
+    fmt = req.get("output_format", "minutes")
+    custom = req.get("custom_instructions", "")
+
+    length_guide = {"short": "約300字", "medium": "約800字", "detailed": "約1500字"}
+    length_text = length_guide.get(length, "約800字")
+
+    format_guide = {
+        "minutes": "會議紀錄（包含討論要點、決議事項）",
+        "action_items": "行動項目清單（每項包含負責人、截止日期）",
+        "both": "會議紀錄 + 行動項目清單",
+    }
+    format_text = format_guide.get(fmt, "會議紀錄")
+
+    prompt = f"""你是一個專業的會議紀錄生成助手。請根據以下會議轉錄稿生成結構化的會議紀錄。
+
+要求：
+- 輸出語言：{lang}
+- 輸出長度：{length_text}
+- 輸出格式：{format_text}
+- 使用 Markdown 格式
+- 保留關鍵數字、日期、人名
+- 如有投影片內容，整合到相關討論段落中"""
+
+    if custom:
+        prompt += f"\n- 額外要求：{custom}"
+
+    return prompt
+
+
+def _call_deepseek(system_prompt, transcript):
+    response = bedrock.invoke_model(
+        modelId="deepseek.v3.2",
+        body=json.dumps(
+            {
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {
+                        "role": "user",
+                        "content": f"以下是會議轉錄稿，請生成會議紀錄：\n\n{transcript}",
+                    },
+                ],
+                "max_tokens": 4096,
+                "temperature": 0.3,
+            }
+        ),
+        contentType="application/json",
+        accept="application/json",
+    )
+
+    result = json.loads(response["body"].read())
+    return result["choices"][0]["message"]["content"]
+
+
+def _chunked_summarize(system_prompt, transcript, requirements):
+    """Parent-child chunking for very long transcripts."""
+    lines = transcript.split("\n")
+    chunks = []
+    current_chunk = []
+    current_size = 0
+
+    for line in lines:
+        current_chunk.append(line)
+        current_size += len(line) + 1
+        if current_size >= CHUNK_SIZE_CHARS:
+            chunks.append("\n".join(current_chunk))
+            current_chunk = []
+            current_size = 0
+
+    if current_chunk:
+        chunks.append("\n".join(current_chunk))
+
+    # Step 1: Generate outline from first and last chunks
+    outline_text = chunks[0][:50000] + "\n...\n" + chunks[-1][-50000:]
+    outline = _call_deepseek(
+        "根據以下會議轉錄稿的開頭和結尾，生成一個簡要大綱（5-10個要點）。",
+        outline_text,
+    )
+
+    # Step 2: Summarize each chunk with outline context
+    chunk_summaries = []
+    for i, chunk in enumerate(chunks):
+        summary = _call_deepseek(
+            f"{system_prompt}\n\n參考大綱：\n{outline}\n\n"
+            f"這是第 {i + 1}/{len(chunks)} 部分。請總結此部分的要點。",
+            chunk,
+        )
+        chunk_summaries.append(summary)
+
+    # Step 3: Merge all summaries into final minutes
+    combined = "\n\n---\n\n".join(chunk_summaries)
+    final = _call_deepseek(
+        f"{system_prompt}\n\n"
+        "以下是分段總結，請合併成一份完整的會議紀錄。去除重複內容，保持結構一致。",
+        combined,
+    )
+
+    return final

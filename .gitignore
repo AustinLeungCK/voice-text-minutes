@@ -12,6 +12,10 @@ output/
 # Environment
 .env
 
+# AWS
+*.pem
+.aws-sam/
+
 # Python venv artifacts (pip installs to project dir via C:\Python314 venv)
 Lib/
 Scripts/

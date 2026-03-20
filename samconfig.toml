@@ -1,0 +1,18 @@
+version = 0.1
+
+[default.deploy.parameters]
+stack_name = "prod-voice-meeting-minutes"
+region = "ap-east-1"
+profile = "0362"
+capabilities = "CAPABILITY_IAM CAPABILITY_NAMED_IAM"
+confirm_changeset = true
+resolve_s3 = true
+resolve_image_repos = true
+tags = "Project=voice-meeting-minutes ManagedBy=\"AWS SAM\" Env=PROD created-by=austin.leung@ecloudvalley.com"
+
+[default.build.parameters]
+use_container = false
+
+[default.validate.parameters]
+region = "ap-east-1"
+profile = "0362"
