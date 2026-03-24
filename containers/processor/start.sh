@@ -1,15 +1,28 @@
 #!/bin/sh
 echo "=== DIAGNOSTIC: Checking volume mounts ==="
-echo "--- /opt/processor ---"
-ls -la /opt/processor/ 2>&1 || echo "MISSING: /opt/processor does not exist"
-echo "--- /opt/processor/venv/bin ---"
-ls -la /opt/processor/venv/bin/python3 2>&1 || echo "MISSING: venv python3 not found"
-echo "--- /usr/local/bin ---"
-ls -la /usr/local/bin/ffmpeg 2>&1 || echo "MISSING: ffmpeg not found"
-echo "--- mount info ---"
-mount | grep -E "opt|processor" 2>&1 || echo "No mounts matching opt/processor"
-echo "--- df ---"
-df -h /opt/processor 2>&1 || echo "Cannot stat /opt/processor"
+echo "--- /opt/processor/venv/bin full listing ---"
+ls -la /opt/processor/venv/bin/ 2>&1
+echo "--- readlink python3 ---"
+readlink -f /opt/processor/venv/bin/python3 2>&1 || echo "readlink failed"
+echo "--- file python3.11 ---"
+file /opt/processor/venv/bin/python3.11 2>&1 || echo "python3.11 not found"
+echo "--- which python3.11 on host ---"
+ls -la /opt/processor/venv/bin/python3.11 2>&1 || echo "MISSING python3.11 in venv"
+echo "--- check system python ---"
+ls -la /usr/bin/python3* 2>&1 || echo "no system python"
+echo "--- .pyver ---"
+cat /opt/processor/.pyver 2>&1
 echo "=== END DIAGNOSTIC ==="
 
-exec /opt/processor/venv/bin/python3 /app/entrypoint.py "$@"
+# Try multiple python paths
+if [ -x /opt/processor/venv/bin/python3.11 ]; then
+  exec /opt/processor/venv/bin/python3.11 /app/entrypoint.py "$@"
+elif [ -x /opt/processor/venv/bin/python3 ]; then
+  exec /opt/processor/venv/bin/python3 /app/entrypoint.py "$@"
+else
+  echo "FATAL: No python found. Trying readlink resolve..."
+  REAL=$(readlink -f /opt/processor/venv/bin/python3 2>/dev/null)
+  echo "Resolved: $REAL"
+  ls -la "$REAL" 2>&1 || echo "Resolved path doesn't exist either"
+  exit 1
+fi
