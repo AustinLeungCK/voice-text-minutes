@@ -21,7 +21,7 @@ Parameters:
 
   ProcessorAmiId:
     Type: String
-    Default: ""
+    Default: "ami-031e7d8cb5001a0b4"
     Description: Custom AMI ID with pre-baked ML models (from EC2 Image Builder). Leave empty to use default ECS-optimized AMI.
 
 
@@ -785,6 +785,20 @@ Resources:
             Value: "15000"
           - Type: GPU
             Value: "1"
+        Volumes:
+          - Name: processor
+            Host:
+              SourcePath: /opt/processor
+          - Name: ffmpeg
+            Host:
+              SourcePath: /usr/local/bin
+        MountPoints:
+          - ContainerPath: /opt/processor
+            SourceVolume: processor
+            ReadOnly: true
+          - ContainerPath: /usr/local/bin
+            SourceVolume: ffmpeg
+            ReadOnly: true
         JobRoleArn: !GetAtt BatchJobRole.Arn
         ExecutionRoleArn: !GetAtt BatchJobRole.Arn
         LogConfiguration:
@@ -1017,7 +1031,7 @@ Resources:
     Properties:
       Name: prod-voice-meeting-minutes-processor-setup
       Platform: Linux
-      Version: "1.0.7"
+      Version: "1.0.9"
       Description: Install Python, ML packages (Whisper, pyannote, GOT-OCR), pre-download models
       Uri: !Sub "s3://prod-voice-meeting-minutes-data-${AWS::AccountId}/imagebuilder/component.json"
       Tags:
@@ -1030,7 +1044,7 @@ Resources:
     Type: AWS::ImageBuilder::ImageRecipe
     Properties:
       Name: prod-voice-meeting-minutes-processor-recipe
-      Version: "1.0.7"
+      Version: "1.0.9"
       ParentImage: !Sub "{{resolve:ssm:/aws/service/ecs/optimized-ami/amazon-linux-2023/gpu/recommended/image_id}}"
       Components:
         - ComponentArn: !Ref ImageBuilderComponent
