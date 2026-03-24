@@ -733,6 +733,7 @@ Resources:
       State: ENABLED
       ComputeResources:
         Type: SPOT
+        AllocationStrategy: SPOT_CAPACITY_OPTIMIZED
         BidPercentage: 100
         SpotIamFleetRole: !GetAtt BatchSpotFleetRole.Arn
         MinvCpus: 0
