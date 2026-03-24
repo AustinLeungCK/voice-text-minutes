@@ -21,13 +21,13 @@ Frontend (CloudFront)
 
 S3 Upload Event (ap-east-1)
   → Step Functions Pipeline:
-    ├─ AWS Batch (g4dn.xlarge Spot):
+    ├─ AWS Batch (g4dn.xlarge Spot, custom AMI):
     │   ├─ Whisper STT (GPU)
     │   ├─ pyannote diarization (CPU, parallel)
     │   └─ GOT-OCR2.0 (GPU)
     ├─ Lambda: merge transcript
-    ├─ Lambda: Bedrock DeepSeek V3.2 summarize (ap-southeast-1)
-    └─ Lambda: SES email results (ap-southeast-1)
+    ├─ Lambda: Bedrock DeepSeek V3.2 summarize (ap-northeast-1)
+    └─ Lambda: SES email results (ap-southeast-1, cross-account)
 ```
 
 ## 功能
@@ -37,7 +37,7 @@ S3 Upload Event (ap-east-1)
 - **OCR** — GOT-OCR2.0 (AWS) / easyocr (local)，從 Teams 錄影擷取 slide 文字 + 參與者名字
 - **Meeting Minutes** — Bedrock DeepSeek V3.2 (AWS) / LM Studio (local) 整理成結構化會議紀錄
 - **User Requirements** — 同事可揀輸出語言、字數、格式，加自訂要求
-- **Email 通知** — 完成後自動 SES email 結果畀 user
+- **Email 通知** — 完成後自動 SES email 結果畀 user（sender: minutes@msphk.info）
 - **Parent-Child Chunking** — 長 transcript 自動分段摘要，保留全局 context
 
 ## AWS 架構
@@ -45,11 +45,19 @@ S3 Upload Event (ap-east-1)
 | 組件 | Region | 服務 |
 |---|---|---|
 | Upload + Processing | ap-east-1 (HK) | S3, Batch g4dn.xlarge Spot, Lambda, Step Functions, DynamoDB, API Gateway |
-| Summarization | ap-southeast-1 (SG) | Bedrock DeepSeek V3.2 (cross-region call) |
-| Email 通知 | ap-southeast-1 (SG) | SES (cross-region call) |
+| Custom AMI | ap-east-1 (HK) | EC2 Image Builder (AL2023 ECS GPU + ML models pre-baked) |
+| Summarization | ap-northeast-1 (Tokyo) | Bedrock DeepSeek V3.2 (cross-region call) |
+| Email 通知 | ap-southeast-1 (SG) | SES cross-account (5070 account, domain msphk.info) |
 | Frontend | Global | CloudFront → S3 |
-| Source Code | ap-east-1 (HK) | CodeCommit |
+| Source Code | ap-east-1 (HK) | CodeCommit + GitHub |
 | Container Build | ap-east-1 (HK) | CodeBuild → ECR |
+
+### Custom AMI + Thin Docker
+
+ML models 同 Python packages 預裝喺 custom AMI（via EC2 Image Builder），唔係放喺 Docker image。
+Docker image 只有 ~50MB（AL2023-minimal + libsndfile + entrypoint.py）。
+Batch job definition 用 volume mounts 將 AMI 上嘅 `/opt/processor` 掛入 container。
+好處：cold start 快，唔使每次 pull 15GB image。
 
 ## 本地使用（開發/測試）
 
@@ -78,14 +86,17 @@ python transcribe.py recordings/meeting.mp4 --output output/meeting_minutes.md
 ## AWS 部署
 
 ```bash
-# 1. Build
+# Build + Deploy
 sam build --profile 0362 --region ap-east-1
-
-# 2. Deploy
 sam deploy --profile 0362 --region ap-east-1
 
-# 3. Build processor container (via CodeBuild)
-aws codebuild start-build --project-name prod-voice-meeting-minutes-build --profile 0362 --region ap-east-1
+# Build custom AMI (first time + when updating ML models)
+aws imagebuilder start-image-pipeline-execution \
+  --image-pipeline-arn <pipeline-arn> --profile 0362 --region ap-east-1
+
+# Build processor container (after code changes)
+aws codebuild start-build \
+  --project-name prod-voice-meeting-minutes-build --profile 0362 --region ap-east-1
 ```
 
 詳細部署計劃見 [AWS_MIGRATION_PLAN.md](AWS_MIGRATION_PLAN.md)。
@@ -102,16 +113,22 @@ voice-text-minutes/
 │   └── pipeline.asl.json      # Step Functions state machine
 ├── lambdas/
 │   ├── submit_job/            # API: 接收 requirements + presigned URL
-│   ├── start_pipeline/        # S3 event → 啟動 Step Functions
+│   ├── start_pipeline/        # EventBridge S3 event → 啟動 Step Functions
 │   ├── merge_transcript/      # 合併 Whisper + diarization + OCR
-│   ├── summarize/             # Bedrock DeepSeek V3.2 摘要
-│   ├── notify/                # SES email 通知
+│   ├── summarize/             # Bedrock DeepSeek V3.2 摘要 (ap-northeast-1)
+│   ├── notify/                # SES email 通知 (cross-account 5070)
 │   └── get_status/            # 查詢 job 狀態
 ├── containers/
 │   └── processor/
-│       ├── Dockerfile         # CUDA + Whisper + pyannote + GOT-OCR2.0
-│       └── entrypoint.py      # Batch job 入口
-├── frontend/                  # Web frontend（TBD）
+│       ├── Dockerfile         # AL2023-minimal + libsndfile（~50MB）
+│       └── entrypoint.py      # Batch job 入口（packages from host AMI mount）
+├── imagebuilder/
+│   ├── component.json         # Image Builder component（ML stack install）
+│   └── component.yml          # Component YAML reference（unused, JSON required）
+├── frontend/
+│   ├── index.html             # Requirements 表單 + upload
+│   ├── style.css
+│   └── app.js
 ├── recordings/                # 本地錄音檔（gitignored）
 └── output/                    # 本地輸出結果（gitignored）
 ```
@@ -135,3 +152,5 @@ voice-text-minutes/
 | Whisper STT | GPU (CUDA) |
 | pyannote diarization | CPU (parallel with Whisper) |
 | GOT-OCR2.0 | GPU (after Whisper) |
+
+ML packages 同 models 預裝喺 custom AMI，Docker container 透過 volume mount 存取。

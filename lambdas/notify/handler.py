@@ -4,12 +4,13 @@ import os
 import boto3
 
 s3_client = boto3.client("s3")
-ses_client = boto3.client("ses", region_name=os.environ.get("SES_REGION", "ap-southeast-1"))
+ses_client = boto3.client("sesv2", region_name=os.environ.get("SES_REGION", "ap-southeast-1"))
 dynamodb = boto3.resource("dynamodb")
 
 JOBS_TABLE = os.environ["JOBS_TABLE"]
 DATA_BUCKET = os.environ["DATA_BUCKET"]
 SES_FROM_EMAIL = os.environ["SES_FROM_EMAIL"]
+SES_IDENTITY_ARN = os.environ.get("SES_IDENTITY_ARN", "")
 
 
 def lambda_handler(event, context):
@@ -50,51 +51,55 @@ def _send_success_email(job_id, email):
 
     short_id = job_id[:8]
 
-    ses_client.send_email(
-        Source=SES_FROM_EMAIL,
-        Destination={"ToAddresses": [email]},
-        Message={
-            "Subject": {
-                "Data": f"你嘅會議紀錄已準備好 — {short_id}",
-                "Charset": "UTF-8",
-            },
-            "Body": {
-                "Html": {
-                    "Data": _build_success_html(minutes_content, download_url, short_id),
-                    "Charset": "UTF-8",
-                },
-                "Text": {
-                    "Data": f"會議紀錄 ({short_id}):\n\n{minutes_content}\n\n"
-                    f"下載連結（7日有效）：{download_url}",
-                    "Charset": "UTF-8",
+    send_params = {
+        "FromEmailAddress": SES_FROM_EMAIL,
+        "Destination": {"ToAddresses": [email]},
+        "Content": {
+            "Simple": {
+                "Subject": {"Data": f"你嘅會議紀錄已準備好 — {short_id}", "Charset": "UTF-8"},
+                "Body": {
+                    "Html": {
+                        "Data": _build_success_html(minutes_content, download_url, short_id),
+                        "Charset": "UTF-8",
+                    },
+                    "Text": {
+                        "Data": f"會議紀錄 ({short_id}):\n\n{minutes_content}\n\n"
+                        f"下載連結（7日有效）：{download_url}",
+                        "Charset": "UTF-8",
+                    },
                 },
             },
         },
-    )
+    }
+    if SES_IDENTITY_ARN:
+        send_params["FromEmailAddressIdentityArn"] = SES_IDENTITY_ARN
+    ses_client.send_email(**send_params)
 
 
 def _send_failure_email(job_id, email, error):
     short_id = job_id[:8]
     error_msg = json.dumps(error, ensure_ascii=False) if error else "Unknown error"
 
-    ses_client.send_email(
-        Source=SES_FROM_EMAIL,
-        Destination={"ToAddresses": [email]},
-        Message={
-            "Subject": {
-                "Data": f"會議紀錄處理失敗 — {short_id}",
-                "Charset": "UTF-8",
-            },
-            "Body": {
-                "Text": {
-                    "Data": f"Job {short_id} 處理失敗。\n\n"
-                    f"錯誤信息：{error_msg}\n\n"
-                    "請嘗試重新上傳錄影。",
-                    "Charset": "UTF-8",
+    send_params = {
+        "FromEmailAddress": SES_FROM_EMAIL,
+        "Destination": {"ToAddresses": [email]},
+        "Content": {
+            "Simple": {
+                "Subject": {"Data": f"會議紀錄處理失敗 — {short_id}", "Charset": "UTF-8"},
+                "Body": {
+                    "Text": {
+                        "Data": f"Job {short_id} 處理失敗。\n\n"
+                        f"錯誤信息：{error_msg}\n\n"
+                        "請嘗試重新上傳錄影。",
+                        "Charset": "UTF-8",
+                    },
                 },
             },
         },
-    )
+    }
+    if SES_IDENTITY_ARN:
+        send_params["FromEmailAddressIdentityArn"] = SES_IDENTITY_ARN
+    ses_client.send_email(**send_params)
 
 
 def _build_success_html(minutes, download_url, short_id):

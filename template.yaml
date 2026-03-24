@@ -11,7 +11,7 @@ Description: >
 Parameters:
   SESFromEmail:
     Type: String
-    Default: minutes@yourcompany.com
+    Default: minutes@msphk.info
     Description: SES verified sender email (in ap-southeast-1)
 
   ProcessorImageUri:
@@ -46,8 +46,9 @@ Globals:
         JOBS_TABLE: !Ref JobsTable
         DATA_BUCKET: !Ref DataBucket
         SES_REGION: ap-southeast-1
-        BEDROCK_REGION: ap-southeast-1
+        BEDROCK_REGION: ap-northeast-1
         SES_FROM_EMAIL: !Ref SESFromEmail
+        SES_IDENTITY_ARN: arn:aws:ses:ap-southeast-1:507088713162:identity/msphk.info
     Tags:
       Project: voice-meeting-minutes
       ManagedBy: AWS SAM
@@ -408,7 +409,9 @@ Resources:
               Resource: "*"
               Condition:
                 StringEquals:
-                  "aws:RequestedRegion": "ap-southeast-1"
+                  "aws:RequestedRegion":
+                    - "ap-southeast-1"
+                    - "ap-northeast-1"
 
   NotifyFunction:
     Type: AWS::Serverless::Function
@@ -428,6 +431,7 @@ Resources:
               Action:
                 - ses:SendEmail
                 - ses:SendRawEmail
+                - ses:SendBulkEmail
               Resource: "*"
               Condition:
                 StringEquals:
