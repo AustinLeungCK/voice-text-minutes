@@ -19,6 +19,17 @@ Parameters:
     Default: "PLACEHOLDER"
     Description: ECR image URI for processor container (update after first push)
 
+  ProcessorAmiId:
+    Type: String
+    Default: ""
+    Description: Custom AMI ID with pre-baked ML models (from EC2 Image Builder). Leave empty to use default ECS-optimized AMI.
+
+
+# =============================================================================
+# Conditions
+# =============================================================================
+Conditions:
+  HasCustomAmi: !Not [!Equals [!Ref ProcessorAmiId, ""]]
 
 # =============================================================================
 # Globals
@@ -655,6 +666,7 @@ Resources:
         DesiredvCpus: 0
         InstanceTypes:
           - g4dn.xlarge
+        ImageId: !If [HasCustomAmi, !Ref ProcessorAmiId, !Ref "AWS::NoValue"]
         Subnets:
           - !Ref PublicSubnet1a
           - !Ref PublicSubnet1b
@@ -699,6 +711,20 @@ Resources:
             Value: "1"
         JobRoleArn: !GetAtt BatchJobRole.Arn
         ExecutionRoleArn: !GetAtt BatchJobRole.Arn
+        Volumes:
+          - Name: processor
+            Host:
+              SourcePath: /opt/processor
+          - Name: local-bin
+            Host:
+              SourcePath: /usr/local/bin
+        MountPoints:
+          - ContainerPath: /opt/processor
+            SourceVolume: processor
+            ReadOnly: true
+          - ContainerPath: /usr/local/bin
+            SourceVolume: local-bin
+            ReadOnly: true
         LogConfiguration:
           LogDriver: awslogs
           Options:
@@ -880,6 +906,133 @@ Resources:
         - Key: created-by
           Value: austin.leung@ecloudvalley.com
 
+  # ---------------------------------------------------------------------------
+  # EC2 Image Builder — Custom AMI with ML models
+  # Base: ECS-optimized AL2023 GPU AMI
+  # ---------------------------------------------------------------------------
+  ImageBuilderRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: prod-voice-meeting-minutes-imagebuilder-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+        - arn:aws:iam::aws:policy/EC2InstanceProfileForImageBuilder
+      Policies:
+        - PolicyName: SecretsAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:prod-voice-meeting-minutes/*"
+      Tags:
+        - Key: Project
+          Value: voice-meeting-minutes
+        - Key: ManagedBy
+          Value: AWS SAM
+        - Key: Env
+          Value: PROD
+        - Key: created-by
+          Value: austin.leung@ecloudvalley.com
+
+  ImageBuilderInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: prod-voice-meeting-minutes-imagebuilder-profile
+      Roles:
+        - !Ref ImageBuilderRole
+
+  ImageBuilderComponent:
+    Type: AWS::ImageBuilder::Component
+    Properties:
+      Name: prod-voice-meeting-minutes-processor-setup
+      Platform: Linux
+      Version: "1.0.6"
+      Description: Install Python 3.11, ML packages, and pre-download models
+      Uri: s3://aws-sam-cli-managed-default-samclisourcebucket-dbwfevuthl4p/imagebuilder/component-v6.json
+      Tags:
+        Project: voice-meeting-minutes
+        ManagedBy: AWS SAM
+        Env: PROD
+        created-by: austin.leung@ecloudvalley.com
+
+  ImageBuilderRecipe:
+    Type: AWS::ImageBuilder::ImageRecipe
+    Properties:
+      Name: prod-voice-meeting-minutes-processor-recipe
+      Version: "1.0.6"
+      ParentImage: !Sub "{{resolve:ssm:/aws/service/ecs/optimized-ami/amazon-linux-2023/gpu/recommended/image_id}}"
+      Components:
+        - ComponentArn: !Ref ImageBuilderComponent
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeSize: 100
+            VolumeType: gp3
+      Tags:
+        Project: voice-meeting-minutes
+        ManagedBy: AWS SAM
+        Env: PROD
+        created-by: austin.leung@ecloudvalley.com
+
+  ImageBuilderInfraConfig:
+    Type: AWS::ImageBuilder::InfrastructureConfiguration
+    Properties:
+      Name: prod-voice-meeting-minutes-infra-config
+      InstanceProfileName: !Ref ImageBuilderInstanceProfile
+      InstanceTypes:
+        - g4dn.xlarge
+      SubnetId: !Ref PublicSubnet1a
+      SecurityGroupIds:
+        - !Ref BatchSecurityGroup
+      TerminateInstanceOnFailure: true
+      Tags:
+        Project: voice-meeting-minutes
+        ManagedBy: AWS SAM
+        Env: PROD
+        created-by: austin.leung@ecloudvalley.com
+
+  ImageBuilderDistribution:
+    Type: AWS::ImageBuilder::DistributionConfiguration
+    Properties:
+      Name: prod-voice-meeting-minutes-distribution
+      Distributions:
+        - Region: !Ref AWS::Region
+          AmiDistributionConfiguration:
+            Name: "prod-voice-meeting-minutes-processor-{{ imagebuilder:buildDate }}"
+            AmiTags:
+              Project: voice-meeting-minutes
+              ManagedBy: AWS SAM
+              Env: PROD
+              created-by: austin.leung@ecloudvalley.com
+      Tags:
+        Project: voice-meeting-minutes
+        ManagedBy: AWS SAM
+        Env: PROD
+        created-by: austin.leung@ecloudvalley.com
+
+  ImageBuilderPipeline:
+    Type: AWS::ImageBuilder::ImagePipeline
+    Properties:
+      Name: prod-voice-meeting-minutes-pipeline
+      ImageRecipeArn: !Ref ImageBuilderRecipe
+      InfrastructureConfigurationArn: !Ref ImageBuilderInfraConfig
+      DistributionConfigurationArn: !Ref ImageBuilderDistribution
+      Status: ENABLED
+      Tags:
+        Project: voice-meeting-minutes
+        ManagedBy: AWS SAM
+        Env: PROD
+        created-by: austin.leung@ecloudvalley.com
+
 # =============================================================================
 # Outputs
 # =============================================================================
@@ -923,3 +1076,7 @@ Outputs:
   CodeBuildProjectName:
     Description: CodeBuild project name for building processor container
     Value: !Ref CodeBuildProject
+
+  ImageBuilderPipelineArn:
+    Description: EC2 Image Builder pipeline ARN (run to build custom AMI)
+    Value: !Ref ImageBuilderPipeline

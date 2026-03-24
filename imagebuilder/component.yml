@@ -1,0 +1,43 @@
+name: processor-setup
+description: Install ML stack for meeting minutes processor
+schemaVersion: 1.0
+phases:
+  build:
+    steps:
+      - name: Setup
+        action: ExecuteBash
+        inputs:
+          commands:
+            - echo "=== System update ==="
+            - dnf update -y
+            - echo "=== Installing dependencies ==="
+            - dnf install -y python3.11 python3.11-pip python3.11-devel gcc gcc-c++ libsndfile libsndfile-devel git
+            - dnf clean all
+            - echo "=== Installing ffmpeg ==="
+            - cd /tmp && curl -sL https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz -o ffmpeg.tar.xz
+            - cd /tmp && tar xf ffmpeg.tar.xz && cp ffmpeg-*-static/ffmpeg /usr/local/bin/ && cp ffmpeg-*-static/ffprobe /usr/local/bin/
+            - chmod +x /usr/local/bin/ffmpeg /usr/local/bin/ffprobe
+            - rm -rf /tmp/ffmpeg*
+            - echo "=== Creating Python venv ==="
+            - python3.11 -m venv /opt/processor/venv
+            - /opt/processor/venv/bin/pip install --upgrade pip
+            - /opt/processor/venv/bin/pip install --no-cache-dir torch==2.4.0 --index-url https://download.pytorch.org/whl/cu121
+            - /opt/processor/venv/bin/pip install --no-cache-dir faster-whisper==1.1.0 pyannote.audio==3.3.2 soundfile==0.12.1 transformers==4.45.0 tiktoken boto3
+            - /opt/processor/venv/bin/pip install --no-cache-dir got-ocr2 || true
+            - echo "=== Downloading models ==="
+            - export HF_HOME=/opt/processor/models
+            - /opt/processor/venv/bin/python3 -c "from faster_whisper import WhisperModel; WhisperModel('large-v3-turbo', device='cpu', compute_type='int8'); print('Whisper OK')"
+            - /opt/processor/venv/bin/python3 -c "from transformers import AutoModel, AutoTokenizer; AutoTokenizer.from_pretrained('stepfun-ai/GOT-OCR-2.0-hf', trust_remote_code=True); AutoModel.from_pretrained('stepfun-ai/GOT-OCR-2.0-hf', trust_remote_code=True); print('GOT-OCR OK')" || true
+            - export HF_TOKEN=$(aws secretsmanager get-secret-value --secret-id prod-voice-meeting-minutes/hf-token --region ap-east-1 --query SecretString --output text | python3.11 -c "import sys,json;print(json.load(sys.stdin)['HF_TOKEN'])")
+            - /opt/processor/venv/bin/python3 -c "import os; from pyannote.audio import Pipeline; Pipeline.from_pretrained('pyannote/speaker-diarization-3.1', use_auth_token=os.environ['HF_TOKEN']); print('pyannote OK')"
+            - chmod -R 755 /opt/processor
+            - du -sh /opt/processor/*
+  validate:
+    steps:
+      - name: Validate
+        action: ExecuteBash
+        inputs:
+          commands:
+            - /opt/processor/venv/bin/python3 --version
+            - ffmpeg -version | head -1
+            - /opt/processor/venv/bin/python3 -c "import faster_whisper, pyannote.audio, transformers, torch; print('All imports OK')"

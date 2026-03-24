@@ -20,6 +20,9 @@ import tempfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
+# Models and packages are mounted from host AMI at /opt/processor
+os.environ.setdefault("HF_HOME", "/opt/processor/models")
+
 import boto3
 
 s3_client = boto3.client("s3")
