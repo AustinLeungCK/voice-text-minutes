@@ -1,0 +1,15 @@
+#!/bin/sh
+echo "=== DIAGNOSTIC: Checking volume mounts ==="
+echo "--- /opt/processor ---"
+ls -la /opt/processor/ 2>&1 || echo "MISSING: /opt/processor does not exist"
+echo "--- /opt/processor/venv/bin ---"
+ls -la /opt/processor/venv/bin/python3 2>&1 || echo "MISSING: venv python3 not found"
+echo "--- /usr/local/bin ---"
+ls -la /usr/local/bin/ffmpeg 2>&1 || echo "MISSING: ffmpeg not found"
+echo "--- mount info ---"
+mount | grep -E "opt|processor" 2>&1 || echo "No mounts matching opt/processor"
+echo "--- df ---"
+df -h /opt/processor 2>&1 || echo "Cannot stat /opt/processor"
+echo "=== END DIAGNOSTIC ==="
+
+exec /opt/processor/venv/bin/python3 /app/entrypoint.py "$@"

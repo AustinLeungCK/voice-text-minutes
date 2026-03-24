@@ -5,5 +5,7 @@ FROM public.ecr.aws/amazonlinux/amazonlinux:2023-minimal
 RUN dnf install -y libsndfile && dnf clean all
 
 COPY entrypoint.py /app/entrypoint.py
+COPY start.sh /app/start.sh
+RUN chmod +x /app/start.sh
 
-ENTRYPOINT ["/opt/processor/venv/bin/python3", "/app/entrypoint.py"]
+ENTRYPOINT ["/app/start.sh"]
