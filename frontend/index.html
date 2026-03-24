@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Meeting Minutes Generator</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>Meeting Minutes Generator</h1>
+        <p class="subtitle">Upload 會議錄影，自動生成結構化會議紀錄</p>
+
+        <!-- Step 1: Requirements -->
+        <div id="step-requirements" class="step active">
+            <h2>1. 設定要求</h2>
+            <form id="requirements-form">
+                <div class="form-group">
+                    <label for="email">Email 地址 <span class="required">*</span></label>
+                    <input type="email" id="email" required placeholder="your.name@company.com">
+                    <small>完成後會 email 通知你</small>
+                </div>
+
+                <div class="form-group">
+                    <label for="output-language">輸出語言</label>
+                    <select id="output-language">
+                        <option value="繁體中文" selected>繁體中文</option>
+                        <option value="简体中文">简体中文</option>
+                        <option value="English">English</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="summary-length">Summary 長度</label>
+                    <select id="summary-length">
+                        <option value="short">簡短 (~300字)</option>
+                        <option value="medium" selected>標準 (~800字)</option>
+                        <option value="detailed">詳細 (~1500字)</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label>輸出格式</label>
+                    <div class="radio-group">
+                        <label class="radio-label">
+                            <input type="radio" name="output-format" value="minutes" checked>
+                            會議紀錄
+                        </label>
+                        <label class="radio-label">
+                            <input type="radio" name="output-format" value="action_items">
+                            行動項目
+                        </label>
+                        <label class="radio-label">
+                            <input type="radio" name="output-format" value="both">
+                            兩者都要
+                        </label>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="custom-instructions">額外要求 <span class="optional">(選填)</span></label>
+                    <textarea id="custom-instructions" rows="3"
+                        placeholder="例如：重點列出技術決策、忽略閒聊部分、特別關注 timeline..."></textarea>
+                </div>
+
+                <button type="submit" class="btn btn-primary">下一步：Upload 錄影</button>
+            </form>
+        </div>
+
+        <!-- Step 2: Upload -->
+        <div id="step-upload" class="step">
+            <h2>2. Upload 會議錄影</h2>
+            <div class="upload-area" id="upload-area">
+                <div class="upload-icon">&#128196;</div>
+                <p>拖放 MP4 檔案到呢度</p>
+                <p class="or">或者</p>
+                <label class="btn btn-secondary upload-btn">
+                    選擇檔案
+                    <input type="file" id="file-input" accept=".mp4,.m4a,.wav,.mkv" hidden>
+                </label>
+                <small>支援 MP4, M4A, WAV, MKV (最大 2GB)</small>
+            </div>
+
+            <div id="upload-progress" class="progress-container" hidden>
+                <div class="file-info">
+                    <span id="file-name"></span>
+                    <span id="file-size"></span>
+                </div>
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progress-fill"></div>
+                </div>
+                <span id="progress-text">0%</span>
+            </div>
+
+            <button class="btn btn-back" id="btn-back" type="button">返回修改要求</button>
+        </div>
+
+        <!-- Step 3: Done -->
+        <div id="step-done" class="step">
+            <h2>已提交！</h2>
+            <div class="done-message">
+                <div class="done-icon">&#9989;</div>
+                <p>你嘅會議錄影已經開始處理。</p>
+                <p>完成後會 email 通知你：<strong id="done-email"></strong></p>
+                <p class="job-id">Job ID: <code id="done-job-id"></code></p>
+                <p class="estimate">預計處理時間：15-30 分鐘</p>
+            </div>
+            <button class="btn btn-primary" id="btn-new" type="button">提交另一個錄影</button>
+        </div>
+
+        <!-- Error -->
+        <div id="error-banner" class="error-banner" hidden>
+            <span id="error-message"></span>
+            <button class="error-close" id="error-close">&times;</button>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
