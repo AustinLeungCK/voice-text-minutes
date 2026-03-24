@@ -267,14 +267,14 @@ Resources:
           EventBridgeEnabled: true
       LifecycleConfiguration:
         Rules:
-          - Id: DeleteOldUploads
+          - Id: DeleteInputFiles
             Prefix: "jobs/"
             Status: Enabled
-            ExpirationInDays: 90
+            ExpirationInDays: 14
           - Id: AbortIncompleteMultipartUploads
             Status: Enabled
             AbortIncompleteMultipartUpload:
-              DaysAfterInitiation: 7
+              DaysAfterInitiation: 1
       Tags:
         - Key: Project
           Value: voice-meeting-minutes
@@ -646,6 +646,7 @@ Resources:
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
       Tags:
         - Key: Project
           Value: voice-meeting-minutes
@@ -803,6 +804,8 @@ Resources:
         Environment:
           - Name: HF_TOKEN
             Value: "{{resolve:secretsmanager:prod-voice-meeting-minutes/hf-token:SecretString:HF_TOKEN}}"
+          - Name: PYTHONUNBUFFERED
+            Value: "1"
         JobRoleArn: !GetAtt BatchJobRole.Arn
         ExecutionRoleArn: !GetAtt BatchJobRole.Arn
         LogConfiguration:
@@ -812,9 +815,16 @@ Resources:
             awslogs-region: !Ref AWS::Region
             awslogs-stream-prefix: processor
       RetryStrategy:
-        Attempts: 2
+        Attempts: 3
+        EvaluateOnExit:
+          - OnReason: "Host EC2*"
+            Action: RETRY
+          - OnStatusReason: "Host EC2*"
+            Action: RETRY
+          - OnExitCode: "0"
+            Action: EXIT
       Timeout:
-        AttemptDurationSeconds: 1800
+        AttemptDurationSeconds: 3600
       Tags:
         Project: voice-meeting-minutes
         ManagedBy: AWS SAM

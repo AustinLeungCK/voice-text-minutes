@@ -10,14 +10,20 @@ Flow:
    - Thread B (CPU): pyannote diarization
 4. Sequential (GPU): GOT-OCR2.0 for participant names + slides
 5. Upload results to S3
+
+Spot handling:
+- SIGTERM → upload whatever results are done, then exit
+- Checkpoint each stage to S3 immediately after completion
+- On restart, skip stages that already have results in S3
 """
 
 import json
 import os
+import signal
 import subprocess
 import sys
 import tempfile
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
 from pathlib import Path
 
 # Models: 優先用 host AMI 預裝嘅，fallback 到 default cache（fat container 模式會下載）
@@ -35,6 +41,46 @@ S3_BUCKET = os.environ["S3_BUCKET"]
 S3_PREFIX = f"jobs/{JOB_ID}"
 WORK_DIR = Path(tempfile.mkdtemp())
 
+# Spot interruption flag
+_shutting_down = threading.Event()
+
+
+def _sigterm_handler(signum, frame):
+    """Handle SIGTERM from Spot interruption (2-min warning)."""
+    print("SIGTERM received — Spot interruption. Uploading partial results...", flush=True)
+    _shutting_down.set()
+
+
+signal.signal(signal.SIGTERM, _sigterm_handler)
+
+
+def _checkpoint_exists(name):
+    """Check if a stage result already exists in S3 (from a previous attempt)."""
+    try:
+        s3_client.head_object(Bucket=S3_BUCKET, Key=f"{S3_PREFIX}/{name}_result.json")
+        return True
+    except s3_client.exceptions.ClientError:
+        return False
+
+
+def _upload_result(name, data):
+    """Upload a stage result to S3 as checkpoint."""
+    key = f"{S3_PREFIX}/{name}_result.json"
+    s3_client.put_object(
+        Bucket=S3_BUCKET,
+        Key=key,
+        Body=json.dumps(data, ensure_ascii=False).encode("utf-8"),
+        ContentType="application/json",
+    )
+    print(f"Uploaded {key}")
+
+
+def _download_result(name):
+    """Download a previously checkpointed result from S3."""
+    key = f"{S3_PREFIX}/{name}_result.json"
+    resp = s3_client.get_object(Bucket=S3_BUCKET, Key=key)
+    return json.loads(resp["Body"].read().decode("utf-8"))
+
 
 def main():
     print(f"Starting processor for job {JOB_ID}")
@@ -44,6 +90,10 @@ def main():
     print("Downloading MP4 from S3...")
     s3_client.download_file(S3_BUCKET, f"{S3_PREFIX}/input.mp4", str(mp4_path))
     print(f"Downloaded {mp4_path.stat().st_size / 1e6:.1f} MB")
+
+    if _shutting_down.is_set():
+        print("Interrupted after download, exiting.")
+        sys.exit(1)
 
     # Step 2: Extract audio
     wav_path = WORK_DIR / "audio.wav"
@@ -59,40 +109,30 @@ def main():
     )
     print(f"Audio extracted: {wav_path.stat().st_size / 1e6:.1f} MB")
 
-    # Upload WAV for reference
-    s3_client.upload_file(str(wav_path), S3_BUCKET, f"{S3_PREFIX}/audio.wav")
-
-    # Step 3: Parallel — Whisper (GPU) + Diarization (CPU)
+    # Step 3–5: Sequential GPU pipeline (Whisper → Diarization → OCR)
+    # Each stage checkpointed to S3 for Spot resume
     results = {}
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        futures = {
-            executor.submit(run_whisper, wav_path): "whisper",
-            executor.submit(run_diarize, wav_path): "diarize",
-        }
-        for future in as_completed(futures):
-            name = futures[future]
-            try:
-                results[name] = future.result()
-                print(f"{name} completed")
-            except Exception as e:
-                print(f"{name} failed: {e}", file=sys.stderr)
-                raise
 
-    # Step 4: OCR (GPU) — after Whisper releases GPU memory
-    print("Running OCR...")
-    results["ocr"] = run_ocr(mp4_path)
-    print("OCR completed")
+    stages = [
+        ("whisper", lambda: run_whisper(wav_path)),
+        ("diarize", lambda: run_diarize(wav_path)),
+        ("ocr", lambda: run_ocr(mp4_path)),
+    ]
 
-    # Step 5: Upload results to S3
-    for name, data in results.items():
-        key = f"{S3_PREFIX}/{name}_result.json"
-        s3_client.put_object(
-            Bucket=S3_BUCKET,
-            Key=key,
-            Body=json.dumps(data, ensure_ascii=False).encode("utf-8"),
-            ContentType="application/json",
-        )
-        print(f"Uploaded {key}")
+    for name, fn in stages:
+        if _shutting_down.is_set():
+            print(f"Interrupted before {name}, exiting.")
+            sys.exit(1)
+
+        if _checkpoint_exists(name):
+            print(f"Resuming: {name} found in S3, skipping")
+            results[name] = _download_result(name)
+            continue
+
+        print(f"Running {name}...")
+        results[name] = fn()
+        _upload_result(name, results[name])
+        print(f"{name} completed + checkpointed")
 
     print(f"Processor completed for job {JOB_ID}")
 
@@ -129,7 +169,7 @@ def run_whisper(wav_path):
 
 
 def run_diarize(wav_path):
-    """Run pyannote speaker diarization on CPU."""
+    """Run pyannote speaker diarization on GPU."""
     import soundfile as sf
     import torch
     from pyannote.audio import Pipeline
@@ -139,8 +179,9 @@ def run_diarize(wav_path):
         "pyannote/speaker-diarization-3.1",
         use_auth_token=hf_token,
     )
-    # Force CPU
-    pipeline.to(torch.device("cpu"))
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    pipeline.to(device)
+    print(f"Diarization running on {device}")
 
     waveform, sample_rate = sf.read(str(wav_path), dtype="float32")
     waveform_tensor = torch.tensor(waveform).unsqueeze(0)
@@ -156,6 +197,9 @@ def run_diarize(wav_path):
             "end": round(turn.end, 2),
             "speaker": speaker,
         })
+
+    del pipeline
+    _clear_gpu()
 
     return {"segments": segments}
 
@@ -211,6 +255,9 @@ def run_ocr(mp4_path):
         # OCR slides
         slide_files = sorted(frames_dir.glob("slide_*.jpg"))
         for i, slide_path in enumerate(slide_files):
+            if _shutting_down.is_set():
+                print(f"Interrupted during OCR at slide {i}, saving partial results")
+                break
             slide_text = model.chat(tokenizer, str(slide_path), ocr_type="ocr")
             if slide_text.strip():
                 result["slide_contents"].append({
