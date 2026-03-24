@@ -6,21 +6,31 @@ from datetime import datetime, timezone
 import boto3
 
 dynamodb = boto3.resource("dynamodb")
-s3_client = boto3.client("s3")
 
 JOBS_TABLE = os.environ["JOBS_TABLE"]
 DATA_BUCKET = os.environ["DATA_BUCKET"]
+REGION = os.environ.get("AWS_REGION", "ap-east-1")
+
+s3_client = boto3.client(
+    "s3",
+    region_name=REGION,
+    endpoint_url=f"https://s3.{REGION}.amazonaws.com",
+    config=boto3.session.Config(signature_version="s3v4"),
+)
 
 
 def lambda_handler(event, context):
     body = json.loads(event.get("body", "{}"))
 
-    email = body.get("email")
+    # Email 從 Cognito token claims 攞（server-side enforce），fallback 到 body
+    claims = (event.get("requestContext") or {}).get("authorizer", {}).get("claims", {})
+    email = claims.get("email") or body.get("email")
     if not email:
         return _response(400, {"error": "email is required"})
 
     job_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
+    file_name = body.get("file_name", "recording.mp4")
 
     requirements = {
         "output_language": body.get("output_language", "繁體中文"),
@@ -34,6 +44,7 @@ def lambda_handler(event, context):
         Item={
             "job_id": job_id,
             "email": email,
+            "file_name": file_name,
             "requirements": requirements,
             "status": "uploaded",
             "created_at": now,

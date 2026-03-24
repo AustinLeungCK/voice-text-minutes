@@ -1,117 +1,265 @@
 <!DOCTYPE html>
-<html lang="zh-Hant">
+<html lang="zh-Hant" data-theme="light">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Meeting Minutes Generator</title>
+    <title>Precis — 會議紀錄生成器</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=DM+Serif+Display&family=Noto+Sans+TC:wght@400;500;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <div class="container">
-        <h1>Meeting Minutes Generator</h1>
-        <p class="subtitle">Upload 會議錄影，自動生成結構化會議紀錄</p>
+    <!-- ===== Login Screen ===== -->
+    <div class="login-screen" id="login-screen">
+        <div class="login-card">
+            <h1 class="login-card__logo">Precis</h1>
+            <p class="login-card__sub" data-i18n="loginSub">會議錄音 → 結構化會議紀錄</p>
 
-        <!-- Step 1: Requirements -->
-        <div id="step-requirements" class="step active">
-            <h2>1. 設定要求</h2>
-            <form id="requirements-form">
+            <!-- Login Form -->
+            <form class="auth-form" id="auth-login" autocomplete="on">
                 <div class="form-group">
-                    <label for="email">Email 地址 <span class="required">*</span></label>
-                    <input type="email" id="email" required placeholder="your.name@company.com">
-                    <small>完成後會 email 通知你</small>
+                    <label for="login-email" data-i18n="authEmail">Email</label>
+                    <input type="email" id="login-email" required autocomplete="email">
                 </div>
-
                 <div class="form-group">
-                    <label for="output-language">輸出語言</label>
-                    <select id="output-language">
-                        <option value="繁體中文" selected>繁體中文</option>
-                        <option value="简体中文">简体中文</option>
-                        <option value="English">English</option>
-                    </select>
+                    <label for="login-password" data-i18n="authPassword">密碼</label>
+                    <input type="password" id="login-password" required autocomplete="current-password">
                 </div>
+                <p class="auth-error" id="login-error" hidden></p>
+                <button type="submit" class="btn btn--primary btn--full" data-i18n="btnSignIn">登入</button>
+                <p class="auth-hint" data-i18n="contactAdmin">如需帳號，請聯絡管理員。</p>
+            </form>
 
-                <div class="form-group">
-                    <label for="summary-length">Summary 長度</label>
-                    <select id="summary-length">
-                        <option value="short">簡短 (~300字)</option>
-                        <option value="medium" selected>標準 (~800字)</option>
-                        <option value="detailed">詳細 (~1500字)</option>
-                    </select>
+
+            <div class="login-card__footer">
+                <button class="theme-toggle" id="login-theme-toggle" type="button" aria-label="切換主題">
+                    <svg class="theme-toggle__sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+                    <svg class="theme-toggle__moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+                </button>
+                <div class="lang-switcher" role="radiogroup" aria-label="語言">
+                    <button class="lang-switcher__option lang-switcher__option--active" data-lang="zh" role="radio" aria-checked="true" type="button">繁中</button>
+                    <button class="lang-switcher__option" data-lang="en" role="radio" aria-checked="false" type="button">EN</button>
+                    <div class="lang-switcher__slider"></div>
                 </div>
+            </div>
+        </div>
+    </div>
 
-                <div class="form-group">
-                    <label>輸出格式</label>
-                    <div class="radio-group">
-                        <label class="radio-label">
-                            <input type="radio" name="output-format" value="minutes" checked>
-                            會議紀錄
-                        </label>
-                        <label class="radio-label">
-                            <input type="radio" name="output-format" value="action_items">
-                            行動項目
-                        </label>
-                        <label class="radio-label">
-                            <input type="radio" name="output-format" value="both">
-                            兩者都要
-                        </label>
+    <!-- ===== App (hidden until login) ===== -->
+    <div class="layout" id="app-layout" hidden>
+        <!-- ===== Sidebar ===== -->
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar__logo">
+                <span class="sidebar__logo-text">Precis</span>
+                <span class="sidebar__logo-sub" data-i18n="logoSub">精記</span>
+            </div>
+            <nav class="sidebar__nav">
+                <button class="sidebar__item sidebar__item--active" data-page="new" type="button">
+                    <svg class="sidebar__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+                    <span data-i18n="navNew">新錄音</span>
+                </button>
+                <button class="sidebar__item" data-page="history" type="button">
+                    <svg class="sidebar__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                    <span data-i18n="navHistory">歷史記錄</span>
+                </button>
+                <button class="sidebar__item" data-page="settings" type="button">
+                    <svg class="sidebar__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                    <span data-i18n="navSettings">設定</span>
+                </button>
+            </nav>
+            <div class="sidebar__bottom">
+                <div class="sidebar__user" id="sidebar-user">
+                    <div class="sidebar__avatar" id="user-avatar">U</div>
+                    <span class="sidebar__user-name" id="user-name">User</span>
+                </div>
+                <button class="sidebar__item" id="btn-logout" type="button">
+                    <svg class="sidebar__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+                    <span data-i18n="btnLogout">登出</span>
+                </button>
+                <button class="sidebar__collapse" id="sidebar-toggle" type="button" aria-label="收合側欄">
+                    <svg class="sidebar__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="11 17 6 12 11 7"/><polyline points="18 17 13 12 18 7"/></svg>
+                </button>
+            </div>
+        </aside>
+
+        <!-- ===== Main ===== -->
+        <main class="main">
+            <!-- Header -->
+            <header class="header">
+                <h1 class="header__title" id="page-title" data-i18n="pageNew">新錄音</h1>
+                <div class="header__actions">
+                    <button class="theme-toggle" id="theme-toggle" type="button" aria-label="切換主題">
+                        <svg class="theme-toggle__sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+                        <svg class="theme-toggle__moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+                    </button>
+                    <div class="lang-switcher" role="radiogroup" aria-label="語言">
+                        <button class="lang-switcher__option lang-switcher__option--active" data-lang="zh" role="radio" aria-checked="true" type="button">繁中</button>
+                        <button class="lang-switcher__option" data-lang="en" role="radio" aria-checked="false" type="button">EN</button>
+                        <div class="lang-switcher__slider"></div>
+                    </div>
+                </div>
+            </header>
+
+            <!-- ===== Page: New Recording ===== -->
+            <div class="page page--active" id="page-new">
+                <div class="wizard-steps">
+                    <div class="wizard-steps__item wizard-steps__item--current" data-step="1">
+                        <div class="wizard-steps__circle">1</div>
+                        <span class="wizard-steps__label" data-i18n="step1">設定要求</span>
+                    </div>
+                    <div class="wizard-steps__connector"></div>
+                    <div class="wizard-steps__item" data-step="2">
+                        <div class="wizard-steps__circle">2</div>
+                        <span class="wizard-steps__label" data-i18n="step2">上傳錄音</span>
+                    </div>
+                    <div class="wizard-steps__connector"></div>
+                    <div class="wizard-steps__item" data-step="3">
+                        <div class="wizard-steps__circle">3</div>
+                        <span class="wizard-steps__label" data-i18n="step3">完成</span>
                     </div>
                 </div>
 
-                <div class="form-group">
-                    <label for="custom-instructions">額外要求 <span class="optional">(選填)</span></label>
-                    <textarea id="custom-instructions" rows="3"
-                        placeholder="例如：重點列出技術決策、忽略閒聊部分、特別關注 timeline..."></textarea>
+                <div class="wizard-card">
+                    <div class="wizard-panel wizard-panel--active" id="step-requirements">
+                        <h2 class="wizard-card__title" data-i18n="requirementsTitle">設定要求</h2>
+                        <form id="requirements-form">
+                            <div class="form-group">
+                                <label for="email" data-i18n="emailLabel">Email 地址 <span class="required">*</span></label>
+                                <input type="email" id="email" required placeholder="your.name@company.com">
+                                <small data-i18n="emailHint">完成後會 email 通知你</small>
+                            </div>
+                            <div class="form-group">
+                                <label for="output-language" data-i18n="outputLangLabel">輸出語言</label>
+                                <select id="output-language">
+                                    <option value="繁體中文" selected>繁體中文</option>
+                                    <option value="简体中文">简体中文</option>
+                                    <option value="English">English</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="summary-length" data-i18n="summaryLenLabel">摘要長度</label>
+                                <select id="summary-length">
+                                    <option value="short" data-i18n="lenShort">簡短 (~300字)</option>
+                                    <option value="medium" selected data-i18n="lenMedium">標準 (~800字)</option>
+                                    <option value="detailed" data-i18n="lenDetailed">詳細 (~1500字)</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label data-i18n="formatLabel">輸出格式</label>
+                                <div class="radio-group">
+                                    <label class="radio-card">
+                                        <input type="radio" name="output-format" value="minutes" checked>
+                                        <div class="radio-card__content">
+                                            <svg class="radio-card__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+                                            <span data-i18n="fmtMinutes">會議紀錄</span>
+                                        </div>
+                                    </label>
+                                    <label class="radio-card">
+                                        <input type="radio" name="output-format" value="action_items">
+                                        <div class="radio-card__content">
+                                            <svg class="radio-card__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                                            <span data-i18n="fmtActions">行動項目</span>
+                                        </div>
+                                    </label>
+                                    <label class="radio-card">
+                                        <input type="radio" name="output-format" value="both">
+                                        <div class="radio-card__content">
+                                            <svg class="radio-card__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+                                            <span data-i18n="fmtBoth">兩者都要</span>
+                                        </div>
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label for="custom-instructions">
+                                    <span data-i18n="customLabel">額外要求</span>
+                                    <span class="optional" data-i18n="optional">(選填)</span>
+                                </label>
+                                <textarea id="custom-instructions" rows="3"
+                                    data-i18n-placeholder="customPlaceholder"
+                                    placeholder="例如：重點列出技術決策、忽略閒聊部分、特別關注 timeline..."></textarea>
+                            </div>
+                            <button type="submit" class="btn btn--primary btn--full" data-i18n="btnNext">下一步：上傳錄音</button>
+                        </form>
+                    </div>
+
+                    <div class="wizard-panel" id="step-upload">
+                        <h2 class="wizard-card__title" data-i18n="uploadTitle">上傳會議錄影</h2>
+                        <div class="upload-zone" id="upload-area">
+                            <div class="upload-zone__icon-wrap">
+                                <svg class="upload-zone__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                            </div>
+                            <p class="upload-zone__label" data-i18n="dropLabel">拖放錄音檔案到呢度</p>
+                            <span class="upload-zone__or" data-i18n="or">或者</span>
+                            <button class="btn btn--secondary upload-zone__browse" type="button" data-i18n="browse">選擇檔案</button>
+                            <input type="file" id="file-input" accept=".mp4,.m4a,.wav,.mkv" hidden>
+                            <small class="upload-zone__hint" data-i18n="uploadHint">支援 MP4, M4A, WAV, MKV（最大 2GB）</small>
+                        </div>
+                        <div class="upload-progress" id="upload-progress" hidden>
+                            <div class="upload-progress__file">
+                                <svg class="upload-progress__file-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+                                <div class="upload-progress__info">
+                                    <span class="upload-progress__name" id="file-name"></span>
+                                    <span class="upload-progress__size" id="file-size"></span>
+                                </div>
+                            </div>
+                            <div class="progress-bar">
+                                <div class="progress-bar__track">
+                                    <div class="progress-bar__fill progress-bar__fill--active" id="progress-fill"></div>
+                                </div>
+                                <span class="progress-bar__text" id="progress-text">0%</span>
+                            </div>
+                        </div>
+                        <button class="btn btn--ghost" id="btn-back" type="button" data-i18n="btnBack">返回修改要求</button>
+                    </div>
+
+                    <div class="wizard-panel" id="step-done">
+                        <div class="done">
+                            <div class="done__icon">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                            </div>
+                            <h2 class="done__title" data-i18n="doneTitle">已提交！</h2>
+                            <p class="done__text" id="done-filename"></p>
+                            <p class="done__text" data-i18n="doneText">你嘅會議錄影已經開始處理。</p>
+                            <p class="done__text"><span data-i18n="doneEmail">完成後會 email 通知你：</span><strong id="done-email"></strong></p>
+                            <p class="done__estimate" data-i18n="doneEstimate">預計處理時間：15–30 分鐘</p>
+                            <button class="btn btn--primary" id="btn-new" type="button" data-i18n="btnNewJob">提交另一個錄影</button>
+                        </div>
+                    </div>
                 </div>
-
-                <button type="submit" class="btn btn-primary">下一步：Upload 錄影</button>
-            </form>
-        </div>
-
-        <!-- Step 2: Upload -->
-        <div id="step-upload" class="step">
-            <h2>2. Upload 會議錄影</h2>
-            <div class="upload-area" id="upload-area">
-                <div class="upload-icon">&#128196;</div>
-                <p>拖放 MP4 檔案到呢度</p>
-                <p class="or">或者</p>
-                <label class="btn btn-secondary upload-btn">
-                    選擇檔案
-                    <input type="file" id="file-input" accept=".mp4,.m4a,.wav,.mkv" hidden>
-                </label>
-                <small>支援 MP4, M4A, WAV, MKV (最大 2GB)</small>
             </div>
 
-            <div id="upload-progress" class="progress-container" hidden>
-                <div class="file-info">
-                    <span id="file-name"></span>
-                    <span id="file-size"></span>
+            <!-- ===== Page: History ===== -->
+            <div class="page" id="page-history">
+                <div class="history-list" id="history-list"></div>
+                <div class="empty-state" id="history-empty" hidden>
+                    <svg class="empty-state__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                    <h2 class="empty-state__title" data-i18n="historyEmpty">暫時冇記錄</h2>
+                    <p class="empty-state__text" data-i18n="historyEmptyText">提交你嘅第一個會議錄音。</p>
                 </div>
-                <div class="progress-bar">
-                    <div class="progress-fill" id="progress-fill"></div>
-                </div>
-                <span id="progress-text">0%</span>
             </div>
 
-            <button class="btn btn-back" id="btn-back" type="button">返回修改要求</button>
-        </div>
-
-        <!-- Step 3: Done -->
-        <div id="step-done" class="step">
-            <h2>已提交！</h2>
-            <div class="done-message">
-                <div class="done-icon">&#9989;</div>
-                <p>你嘅會議錄影已經開始處理。</p>
-                <p>完成後會 email 通知你：<strong id="done-email"></strong></p>
-                <p class="job-id">Job ID: <code id="done-job-id"></code></p>
-                <p class="estimate">預計處理時間：15-30 分鐘</p>
+            <!-- ===== Page: Settings ===== -->
+            <div class="page" id="page-settings">
+                <div class="settings-card">
+                    <h2 class="wizard-card__title" data-i18n="settingsTitle">設定</h2>
+                    <div class="form-group">
+                        <label data-i18n="settingsAccount">帳號</label>
+                        <p id="settings-email" class="settings-value"></p>
+                    </div>
+                    <button class="btn btn--secondary" id="settings-logout" type="button" data-i18n="btnLogout">登出</button>
+                </div>
             </div>
-            <button class="btn btn-primary" id="btn-new" type="button">提交另一個錄影</button>
-        </div>
+        </main>
+    </div>
 
-        <!-- Error -->
-        <div id="error-banner" class="error-banner" hidden>
+    <!-- Error Toast -->
+    <div class="toast" id="error-banner" hidden>
+        <div class="toast__content toast__content--error">
+            <svg class="toast__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
             <span id="error-message"></span>
-            <button class="error-close" id="error-close">&times;</button>
+            <button class="toast__close" id="error-close" type="button" aria-label="關閉">&times;</button>
         </div>
     </div>
 

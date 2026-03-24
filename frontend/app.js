@@ -1,140 +1,486 @@
-// Configuration — update after deployment
-const CONFIG = {
-    API_URL: '', // e.g. https://xxxxxx.execute-api.ap-east-1.amazonaws.com/prod
-    API_KEY: '', // API Gateway API key
+// ==========================================================================
+// Precis — 會議紀錄生成器
+// ==========================================================================
+
+// --- Config（從 config.json 載入，gitignored） ---
+let CONFIG = { API_URL: '', API_KEY: '', COGNITO_CLIENT_ID: '', COGNITO_REGION: '' };
+
+async function loadConfig() {
+    try {
+        const res = await fetch('config.json');
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        CONFIG = await res.json();
+        return;
+    } catch { /* fall through */ }
+    if (window.PRECIS_CONFIG) {
+        CONFIG = window.PRECIS_CONFIG;
+        return;
+    }
+    console.error('Failed to load config — API calls will not work');
+}
+
+// --- Auth（直接 call Cognito API，自訂 login UI） ---
+let currentUser = null;
+
+const COGNITO_URL = () => `https://cognito-idp.${CONFIG.COGNITO_REGION || 'ap-east-1'}.amazonaws.com/`;
+
+async function cognitoCall(action, payload) {
+    const res = await fetch(COGNITO_URL(), {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-amz-json-1.1',
+            'X-Amz-Target': `AWSCognitoIdentityProviderService.${action}`,
+        },
+        body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+        const msg = data.message || data.__type || 'Unknown error';
+        throw { code: data.__type || '', message: msg };
+    }
+    return data;
+}
+
+async function signIn(email, password) {
+    const data = await cognitoCall('InitiateAuth', {
+        AuthFlow: 'USER_PASSWORD_AUTH',
+        ClientId: CONFIG.COGNITO_CLIENT_ID,
+        AuthParameters: { USERNAME: email, PASSWORD: password },
+    });
+    const idToken = data.AuthenticationResult.IdToken;
+    const payload = JSON.parse(atob(idToken.split('.')[1]));
+    const user = {
+        email: payload.email || email,
+        name: payload.name || payload.email || email,
+        token: idToken,
+        expires_at: Date.now() + (data.AuthenticationResult.ExpiresIn || 3600) * 1000,
+    };
+    sessionStorage.setItem('precis-auth', JSON.stringify(user));
+    return user;
+}
+
+
+function loadAuthFromSession() {
+    try {
+        const stored = sessionStorage.getItem('precis-auth');
+        if (!stored) return null;
+        const user = JSON.parse(stored);
+        if (user.expires_at && Date.now() > user.expires_at) {
+            sessionStorage.removeItem('precis-auth');
+            return null;
+        }
+        return user;
+    } catch {
+        return null;
+    }
+}
+
+function authHeaders() {
+    return {
+        'Content-Type': 'application/json',
+        'Authorization': currentUser?.token || '',
+    };
+}
+
+function logout() {
+    sessionStorage.removeItem('precis-auth');
+    currentUser = null;
+    showLogin();
+}
+
+function showApp() {
+    document.getElementById('login-screen').hidden = true;
+    document.getElementById('app-layout').hidden = false;
+
+    // 顯示用戶資料
+    const name = currentUser.name || currentUser.email;
+    document.getElementById('user-name').textContent = name;
+    document.getElementById('user-avatar').textContent = (name[0] || 'U').toUpperCase();
+
+    // 自動填 email
+    const emailInput = document.getElementById('email');
+    if (emailInput && !emailInput.value) {
+        emailInput.value = currentUser.email;
+    }
+
+    // Settings 頁面顯示 email
+    document.getElementById('settings-email').textContent = currentUser.email;
+}
+
+function showLogin() {
+    document.getElementById('login-screen').hidden = false;
+    document.getElementById('app-layout').hidden = true;
+}
+
+// --- i18n 字串表 ---
+const I18N = {
+    zh: {
+        logoSub: '精記',
+        loginSub: '會議錄音 → 結構化會議紀錄',
+        btnLogin: '登入 / 註冊',
+        navNew: '新錄音',
+        navHistory: '歷史記錄',
+        navSettings: '設定',
+        btnLogout: '登出',
+        pageNew: '新錄音',
+        pageHistory: '歷史記錄',
+        pageSettings: '設定',
+        step1: '設定要求',
+        step2: '上傳錄音',
+        step3: '完成',
+        requirementsTitle: '設定要求',
+        emailLabel: 'Email 地址 <span class="required">*</span>',
+        emailHint: '完成後會 email 通知你',
+        outputLangLabel: '輸出語言',
+        summaryLenLabel: '摘要長度',
+        lenShort: '簡短 (~300字)',
+        lenMedium: '標準 (~800字)',
+        lenDetailed: '詳細 (~1500字)',
+        formatLabel: '輸出格式',
+        fmtMinutes: '會議紀錄',
+        fmtActions: '行動項目',
+        fmtBoth: '兩者都要',
+        customLabel: '額外要求',
+        optional: '(選填)',
+        btnNext: '下一步：上傳錄音',
+        uploadTitle: '上傳會議錄影',
+        dropLabel: '拖放錄音檔案到呢度',
+        or: '或者',
+        browse: '選擇檔案',
+        uploadHint: '支援 MP4, M4A, WAV, MKV（最大 2GB）',
+        btnBack: '返回修改要求',
+        doneTitle: '已提交！',
+        doneText: '你嘅會議錄影已經開始處理。',
+        doneEmail: '完成後會 email 通知你：',
+        doneEstimate: '預計處理時間：15–30 分鐘',
+        btnNewJob: '提交另一個錄影',
+        historyEmpty: '暫時冇記錄',
+        historyEmptyText: '提交你嘅第一個會議錄音。',
+        settingsTitle: '設定',
+        settingsText: '登入後可以管理帳號設定。',
+        settingsAccount: '帳號',
+        customPlaceholder: '例如：重點列出技術決策、忽略閒聊部分、特別關注 timeline...',
+        errEmail: '請填寫 email 地址',
+        errNoApi: 'API URL 未設定，請部署 config.json',
+        errSubmit: '提交失敗：',
+        errFileSize: '檔案太大，最大 2GB',
+        errFileType: '唔支援呢個格式，請用 MP4, M4A, WAV 或 MKV',
+        errUploadHttp: 'Upload 失敗：HTTP ',
+        errUploadNet: 'Upload 失敗，請檢查網絡連線',
+        errUpload: 'Upload 失敗：',
+        historyStatus_uploaded: '已上傳',
+        historyStatus_processing: '處理中',
+        historyStatus_completed: '完成',
+        historyStatus_failed: '失敗',
+        authEmail: 'Email',
+        authPassword: '密碼',
+        authCode: '驗證碼',
+        btnSignIn: '登入',
+        btnSignUp: '註冊',
+        btnConfirm: '確認',
+        noAccount: '冇帳號？',
+        goSignUp: '註冊',
+        hasAccount: '已有帳號？',
+        goSignIn: '登入',
+        passwordHint: '最少 8 個字，需要大小寫同數字',
+        confirmInfo: '驗證碼已發送到你嘅 email。',
+        contactAdmin: '如需帳號，請聯絡管理員。',
+    },
+    en: {
+        logoSub: 'Precis',
+        loginSub: 'Meeting recordings → Structured meeting minutes',
+        btnLogin: 'Sign In / Sign Up',
+        navNew: 'New Recording',
+        navHistory: 'History',
+        navSettings: 'Settings',
+        btnLogout: 'Sign Out',
+        pageNew: 'New Recording',
+        pageHistory: 'History',
+        pageSettings: 'Settings',
+        step1: 'Requirements',
+        step2: 'Upload',
+        step3: 'Done',
+        requirementsTitle: 'Set Requirements',
+        emailLabel: 'Email Address <span class="required">*</span>',
+        emailHint: "We'll email you when it's done",
+        outputLangLabel: 'Output Language',
+        summaryLenLabel: 'Summary Length',
+        lenShort: 'Short (~300 words)',
+        lenMedium: 'Standard (~800 words)',
+        lenDetailed: 'Detailed (~1500 words)',
+        formatLabel: 'Output Format',
+        fmtMinutes: 'Meeting Minutes',
+        fmtActions: 'Action Items',
+        fmtBoth: 'Both',
+        customLabel: 'Additional Instructions',
+        optional: '(optional)',
+        btnNext: 'Next: Upload Recording',
+        uploadTitle: 'Upload Meeting Recording',
+        dropLabel: 'Drop your recording file here',
+        or: 'or',
+        browse: 'Browse Files',
+        uploadHint: 'Supports MP4, M4A, WAV, MKV (max 2GB)',
+        btnBack: 'Back to Requirements',
+        doneTitle: 'Submitted!',
+        doneText: 'Your meeting recording is being processed.',
+        doneEmail: "We'll notify you at: ",
+        doneEstimate: 'Estimated processing time: 15–30 minutes',
+        btnNewJob: 'Submit Another Recording',
+        historyEmpty: 'No Records Yet',
+        historyEmptyText: 'Submit your first meeting recording.',
+        settingsTitle: 'Settings',
+        settingsText: 'Sign in to manage your account settings.',
+        settingsAccount: 'Account',
+        customPlaceholder: 'e.g. Focus on technical decisions, skip small talk, highlight timeline...',
+        errEmail: 'Please enter your email address',
+        errNoApi: 'API URL not configured. Deploy config.json first.',
+        errSubmit: 'Submission failed: ',
+        errFileSize: 'File too large, max 2GB',
+        errFileType: 'Unsupported format. Use MP4, M4A, WAV or MKV',
+        errUploadHttp: 'Upload failed: HTTP ',
+        errUploadNet: 'Upload failed. Check your network connection.',
+        errUpload: 'Upload failed: ',
+        historyStatus_uploaded: 'Uploaded',
+        historyStatus_processing: 'Processing',
+        historyStatus_completed: 'Completed',
+        historyStatus_failed: 'Failed',
+        authEmail: 'Email',
+        authPassword: 'Password',
+        authCode: 'Verification Code',
+        btnSignIn: 'Sign In',
+        btnSignUp: 'Sign Up',
+        btnConfirm: 'Confirm',
+        noAccount: "Don't have an account?",
+        goSignUp: 'Sign Up',
+        hasAccount: 'Already have an account?',
+        goSignIn: 'Sign In',
+        passwordHint: 'Min 8 characters, uppercase, lowercase and numbers',
+        confirmInfo: 'A verification code has been sent to your email.',
+        contactAdmin: 'Contact your administrator for an account.',
+    },
 };
 
-// DOM elements
-const stepsEl = {
-    requirements: document.getElementById('step-requirements'),
-    upload: document.getElementById('step-upload'),
-    done: document.getElementById('step-done'),
-};
+let currentLang = 'zh';
 
-const form = document.getElementById('requirements-form');
-const fileInput = document.getElementById('file-input');
-const uploadArea = document.getElementById('upload-area');
-const progressContainer = document.getElementById('upload-progress');
-const progressFill = document.getElementById('progress-fill');
-const progressText = document.getElementById('progress-text');
-const fileNameEl = document.getElementById('file-name');
-const fileSizeEl = document.getElementById('file-size');
-const errorBanner = document.getElementById('error-banner');
-const errorMessage = document.getElementById('error-message');
+function t(key) {
+    return I18N[currentLang][key] || I18N.zh[key] || key;
+}
+
+function applyI18n() {
+    document.querySelectorAll('[data-i18n]').forEach(el => {
+        const key = el.getAttribute('data-i18n');
+        const text = t(key);
+        if (text.includes('<')) {
+            el.innerHTML = text;
+        } else {
+            el.textContent = text;
+        }
+    });
+    document.querySelectorAll('[data-i18n-placeholder]').forEach(el => {
+        el.placeholder = t(el.getAttribute('data-i18n-placeholder'));
+    });
+    document.documentElement.lang = currentLang === 'zh' ? 'zh-Hant' : 'en';
+}
+
+function setLang(lang) {
+    currentLang = lang;
+    localStorage.setItem('precis-lang', lang);
+    applyI18n();
+    document.querySelectorAll('.lang-switcher__option').forEach(btn => {
+        const isActive = btn.dataset.lang === lang;
+        btn.classList.toggle('lang-switcher__option--active', isActive);
+        btn.setAttribute('aria-checked', isActive);
+    });
+    document.querySelectorAll('.lang-switcher__slider').forEach(slider => {
+        slider.classList.toggle('lang-switcher__slider--right', lang === 'en');
+    });
+}
+
+// --- Theme ---
+function setTheme(theme) {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('precis-theme', theme);
+}
+
+function toggleTheme() {
+    const current = document.documentElement.getAttribute('data-theme');
+    setTheme(current === 'dark' ? 'light' : 'dark');
+}
+
+function initTheme() {
+    const saved = localStorage.getItem('precis-theme');
+    if (saved) {
+        setTheme(saved);
+    } else if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
+        setTheme('dark');
+    }
+}
+
+// --- DOM ---
+const stepsEl = {};
+const form = (() => document.getElementById('requirements-form'))();
+let fileInput, uploadArea, progressContainer, progressFill, progressText, fileNameEl, fileSizeEl, errorBanner, errorMessage;
+
+function initDom() {
+    stepsEl.requirements = document.getElementById('step-requirements');
+    stepsEl.upload = document.getElementById('step-upload');
+    stepsEl.done = document.getElementById('step-done');
+    fileInput = document.getElementById('file-input');
+    uploadArea = document.getElementById('upload-area');
+    progressContainer = document.getElementById('upload-progress');
+    progressFill = document.getElementById('progress-fill');
+    progressText = document.getElementById('progress-text');
+    fileNameEl = document.getElementById('file-name');
+    fileSizeEl = document.getElementById('file-size');
+    errorBanner = document.getElementById('error-banner');
+    errorMessage = document.getElementById('error-message');
+}
 
 let currentJobId = null;
 let currentUploadUrl = null;
+let currentStep = 1;
 
-// --- Step navigation ---
-function showStep(name) {
-    Object.values(stepsEl).forEach(el => el.classList.remove('active'));
-    stepsEl[name].classList.add('active');
+// --- Wizard Step Navigation ---
+function updateStepIndicator(step) {
+    const items = document.querySelectorAll('.wizard-steps__item');
+    const connectors = document.querySelectorAll('.wizard-steps__connector');
+    items.forEach((item, i) => {
+        const num = i + 1;
+        item.classList.remove('wizard-steps__item--current', 'wizard-steps__item--completed');
+        const circle = item.querySelector('.wizard-steps__circle');
+        if (num < step) {
+            item.classList.add('wizard-steps__item--completed');
+            circle.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+        } else if (num === step) {
+            item.classList.add('wizard-steps__item--current');
+            circle.textContent = num;
+        } else {
+            circle.textContent = num;
+        }
+    });
+    connectors.forEach((conn, i) => {
+        conn.classList.toggle('wizard-steps__connector--completed', i < step - 1);
+    });
 }
 
-// --- Error handling ---
+function showStep(name) {
+    const stepMap = { requirements: 1, upload: 2, done: 3 };
+    currentStep = stepMap[name];
+    Object.values(stepsEl).forEach(el => el.classList.remove('wizard-panel--active'));
+    stepsEl[name].classList.add('wizard-panel--active');
+    updateStepIndicator(currentStep);
+}
+
+// --- Sidebar Navigation ---
+function showPage(pageName) {
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('page--active'));
+    const page = document.getElementById(`page-${pageName}`);
+    if (page) page.classList.add('page--active');
+    document.querySelectorAll('.sidebar__item[data-page]').forEach(item => {
+        item.classList.toggle('sidebar__item--active', item.dataset.page === pageName);
+    });
+    const titleKey = `page${pageName.charAt(0).toUpperCase() + pageName.slice(1)}`;
+    const titleEl = document.getElementById('page-title');
+    titleEl.textContent = t(titleKey);
+    titleEl.setAttribute('data-i18n', titleKey);
+
+    if (pageName === 'history') loadHistory();
+}
+
+// --- Error ---
 function showError(msg) {
     errorMessage.textContent = msg;
     errorBanner.hidden = false;
     setTimeout(() => { errorBanner.hidden = true; }, 8000);
 }
 
-document.getElementById('error-close').addEventListener('click', () => {
-    errorBanner.hidden = true;
-});
+// --- Step 1: Requirements ---
+let pendingRequirements = null;
 
-// --- Step 1: Requirements form submit ---
-form.addEventListener('submit', async (e) => {
-    e.preventDefault();
+function initFormHandler() {
+    const formEl = document.getElementById('requirements-form');
+    formEl.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const email = document.getElementById('email').value.trim();
+        if (!email) return showError(t('errEmail'));
+        if (!CONFIG.API_URL) return showError(t('errNoApi'));
 
-    const email = document.getElementById('email').value.trim();
-    if (!email) return showError('請填寫 email 地址');
+        pendingRequirements = {
+            email,
+            output_language: document.getElementById('output-language').value,
+            summary_length: document.getElementById('summary-length').value,
+            output_format: document.querySelector('input[name="output-format"]:checked').value,
+            custom_instructions: document.getElementById('custom-instructions').value.trim(),
+        };
+        showStep('upload');
+    });
+}
 
-    if (!CONFIG.API_URL) return showError('API URL 未設定，請更新 app.js CONFIG');
-
-    const requirements = {
-        email,
-        output_language: document.getElementById('output-language').value,
-        summary_length: document.getElementById('summary-length').value,
-        output_format: document.querySelector('input[name="output-format"]:checked').value,
-        custom_instructions: document.getElementById('custom-instructions').value.trim(),
-    };
-
+async function submitJobAndUpload(file) {
+    const payload = { ...pendingRequirements, file_name: file.name };
     try {
         const res = await fetch(`${CONFIG.API_URL}/jobs`, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'x-api-key': CONFIG.API_KEY,
-            },
-            body: JSON.stringify(requirements),
+            headers: authHeaders(),
+            body: JSON.stringify(payload),
         });
-
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
             throw new Error(err.error || `API error: ${res.status}`);
         }
-
         const data = await res.json();
         currentJobId = data.job_id;
         currentUploadUrl = data.upload_url;
-
-        showStep('upload');
+        uploadFile(file);
     } catch (err) {
-        showError(`提交失敗：${err.message}`);
+        showError(t('errSubmit') + err.message);
+        resetUpload();
     }
-});
+}
 
-// --- Step 2: File upload ---
-
-// Drag and drop
-uploadArea.addEventListener('dragover', (e) => {
-    e.preventDefault();
-    uploadArea.classList.add('dragover');
-});
-
-uploadArea.addEventListener('dragleave', () => {
-    uploadArea.classList.remove('dragover');
-});
-
-uploadArea.addEventListener('drop', (e) => {
-    e.preventDefault();
-    uploadArea.classList.remove('dragover');
-    const file = e.dataTransfer.files[0];
-    if (file) handleFile(file);
-});
-
-uploadArea.addEventListener('click', () => {
-    fileInput.click();
-});
-
-fileInput.addEventListener('change', () => {
-    const file = fileInput.files[0];
-    if (file) handleFile(file);
-});
+// --- Step 2: Upload ---
+function initUploadHandlers() {
+    uploadArea.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        uploadArea.classList.add('dragover');
+    });
+    uploadArea.addEventListener('dragleave', () => uploadArea.classList.remove('dragover'));
+    uploadArea.addEventListener('drop', (e) => {
+        e.preventDefault();
+        uploadArea.classList.remove('dragover');
+        const file = e.dataTransfer.files[0];
+        if (file) handleFile(file);
+    });
+    document.querySelector('.upload-zone__browse').addEventListener('click', (e) => {
+        e.stopPropagation();
+        fileInput.click();
+    });
+    uploadArea.addEventListener('click', (e) => {
+        if (e.target.closest('.upload-zone__browse')) return;
+        fileInput.click();
+    });
+    fileInput.addEventListener('change', () => {
+        const file = fileInput.files[0];
+        if (file) handleFile(file);
+    });
+}
 
 function handleFile(file) {
-    const maxSize = 2 * 1024 * 1024 * 1024; // 2GB
-    if (file.size > maxSize) {
-        return showError('檔案太大，最大 2GB');
-    }
-
+    const maxSize = 2 * 1024 * 1024 * 1024;
+    if (file.size > maxSize) return showError(t('errFileSize'));
     const ext = file.name.split('.').pop().toLowerCase();
-    if (!['mp4', 'm4a', 'wav', 'mkv'].includes(ext)) {
-        return showError('唔支援呢個格式，請用 MP4, M4A, WAV 或 MKV');
-    }
+    if (!['mp4', 'm4a', 'wav', 'mkv'].includes(ext)) return showError(t('errFileType'));
 
     fileNameEl.textContent = file.name;
     fileSizeEl.textContent = formatSize(file.size);
     progressContainer.hidden = false;
     uploadArea.style.display = 'none';
-
-    uploadFile(file);
+    submitJobAndUpload(file);
 }
 
 async function uploadFile(file) {
     try {
         const xhr = new XMLHttpRequest();
-
         xhr.upload.addEventListener('progress', (e) => {
             if (e.lengthComputable) {
                 const pct = Math.round((e.loaded / e.total) * 100);
@@ -142,29 +488,27 @@ async function uploadFile(file) {
                 progressText.textContent = `${pct}% (${formatSize(e.loaded)} / ${formatSize(e.total)})`;
             }
         });
-
         xhr.addEventListener('load', () => {
             if (xhr.status >= 200 && xhr.status < 300) {
-                // Upload success — show done
+                progressFill.classList.remove('progress-bar__fill--active');
+                progressFill.classList.add('progress-bar__fill--complete');
                 document.getElementById('done-email').textContent = document.getElementById('email').value;
-                document.getElementById('done-job-id').textContent = currentJobId;
-                showStep('done');
+                document.getElementById('done-filename').textContent = fileNameEl.textContent;
+                setTimeout(() => showStep('done'), 600);
             } else {
-                showError(`Upload 失敗：HTTP ${xhr.status}`);
+                showError(t('errUploadHttp') + xhr.status);
                 resetUpload();
             }
         });
-
         xhr.addEventListener('error', () => {
-            showError('Upload 失敗，請檢查網絡連線');
+            showError(t('errUploadNet'));
             resetUpload();
         });
-
         xhr.open('PUT', currentUploadUrl);
         xhr.setRequestHeader('Content-Type', 'video/mp4');
         xhr.send(file);
     } catch (err) {
-        showError(`Upload 失敗：${err.message}`);
+        showError(t('errUpload') + err.message);
         resetUpload();
     }
 }
@@ -173,24 +517,60 @@ function resetUpload() {
     progressContainer.hidden = true;
     uploadArea.style.display = '';
     progressFill.style.width = '0%';
+    progressFill.classList.add('progress-bar__fill--active');
+    progressFill.classList.remove('progress-bar__fill--complete');
     progressText.textContent = '0%';
     fileInput.value = '';
 }
 
-// --- Step 2: Back button ---
-document.getElementById('btn-back').addEventListener('click', () => {
-    resetUpload();
-    showStep('requirements');
-});
+// --- History ---
+async function loadHistory() {
+    if (!CONFIG.API_URL || !currentUser) return;
+    const listEl = document.getElementById('history-list');
+    const emptyEl = document.getElementById('history-empty');
 
-// --- Step 3: New submission ---
-document.getElementById('btn-new').addEventListener('click', () => {
-    form.reset();
-    resetUpload();
-    currentJobId = null;
-    currentUploadUrl = null;
-    showStep('requirements');
-});
+    try {
+        const res = await fetch(
+            `${CONFIG.API_URL}/jobs`,
+            { headers: { 'Authorization': currentUser?.token || '' } }
+        );
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        const jobs = data.jobs || [];
+
+        if (jobs.length === 0) {
+            listEl.innerHTML = '';
+            emptyEl.hidden = false;
+            return;
+        }
+
+        emptyEl.hidden = true;
+        listEl.innerHTML = jobs.map(job => {
+            const statusKey = `historyStatus_${job.status}`;
+            const statusText = t(statusKey);
+            const statusClass = job.status === 'completed' ? 'success'
+                : job.status === 'failed' ? 'error'
+                : job.status === 'processing' ? 'processing' : 'default';
+            const date = job.created_at ? new Date(job.created_at).toISOString().slice(0, 10) : '';
+            const fmt = job.requirements?.output_format || '';
+            const lang = job.requirements?.output_language || '';
+
+            const title = job.file_name || `${job.job_id.substring(0, 8)}...`;
+
+            return `<div class="history-item">
+                <div class="history-item__status history-item__status--${statusClass}"></div>
+                <div class="history-item__body">
+                    <div class="history-item__title">${title}</div>
+                    <div class="history-item__meta">${date} · ${lang} · ${fmt}</div>
+                </div>
+                <span class="history-item__badge history-item__badge--${statusClass}">${statusText}</span>
+            </div>`;
+        }).join('');
+    } catch {
+        listEl.innerHTML = '';
+        emptyEl.hidden = false;
+    }
+}
 
 // --- Utility ---
 function formatSize(bytes) {
@@ -199,3 +579,86 @@ function formatSize(bytes) {
     if (bytes >= 1024) return (bytes / 1024).toFixed(1) + ' KB';
     return bytes + ' B';
 }
+
+// --- Event Listeners ---
+function initEventListeners() {
+    // Error close
+    document.getElementById('error-close').addEventListener('click', () => {
+        errorBanner.hidden = true;
+    });
+
+    // Back / New buttons
+    document.getElementById('btn-back').addEventListener('click', () => {
+        resetUpload();
+        showStep('requirements');
+    });
+    document.getElementById('btn-new').addEventListener('click', () => {
+        document.getElementById('requirements-form').reset();
+        if (currentUser) document.getElementById('email').value = currentUser.email;
+        resetUpload();
+        currentJobId = null;
+        currentUploadUrl = null;
+        showStep('requirements');
+    });
+
+    // Sidebar nav
+    document.querySelectorAll('.sidebar__item[data-page]').forEach(item => {
+        item.addEventListener('click', () => showPage(item.dataset.page));
+    });
+    document.getElementById('sidebar-toggle').addEventListener('click', () => {
+        document.querySelector('.layout').classList.toggle('sidebar-collapsed');
+    });
+
+    // Theme toggles (login + app)
+    document.querySelectorAll('.theme-toggle').forEach(btn => {
+        btn.addEventListener('click', toggleTheme);
+    });
+
+    // Language switchers (login + app)
+    document.querySelectorAll('.lang-switcher__option').forEach(btn => {
+        btn.addEventListener('click', () => setLang(btn.dataset.lang));
+    });
+
+    // Login form
+    document.getElementById('auth-login').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const errEl = document.getElementById('login-error');
+        errEl.hidden = true;
+        const email = document.getElementById('login-email').value.trim();
+        const password = document.getElementById('login-password').value;
+        try {
+            currentUser = await signIn(email, password);
+            showApp();
+        } catch (err) {
+            errEl.textContent = err.message;
+            errEl.hidden = false;
+        }
+    });
+
+    // Logout buttons
+    document.getElementById('btn-logout').addEventListener('click', logout);
+    document.getElementById('settings-logout').addEventListener('click', logout);
+}
+
+// --- Init ---
+async function init() {
+    initTheme();
+    const savedLang = localStorage.getItem('precis-lang');
+    if (savedLang) setLang(savedLang);
+
+    await loadConfig();
+    initDom();
+    initEventListeners();
+    initFormHandler();
+    initUploadHandlers();
+
+    // Check auth
+    currentUser = loadAuthFromSession();
+    if (currentUser) {
+        showApp();
+    } else {
+        showLogin();
+    }
+}
+
+init();

@@ -16,7 +16,7 @@ Parameters:
 
   ProcessorImageUri:
     Type: String
-    Default: "PLACEHOLDER"
+    Default: "036293420772.dkr.ecr.ap-east-1.amazonaws.com/prod-voice-meeting-minutes-processor:latest"
     Description: ECR image URI for processor container (update after first push)
 
   ProcessorAmiId:
@@ -252,6 +252,16 @@ Resources:
     Type: AWS::S3::Bucket
     Properties:
       BucketName: !Sub "prod-voice-meeting-minutes-data-${AWS::AccountId}"
+      CorsConfiguration:
+        CorsRules:
+          - AllowedOrigins:
+              - "*"
+            AllowedMethods:
+              - PUT
+              - GET
+            AllowedHeaders:
+              - "*"
+            MaxAge: 3600
       NotificationConfiguration:
         EventBridgeConfiguration:
           EventBridgeEnabled: true
@@ -261,6 +271,10 @@ Resources:
             Prefix: "jobs/"
             Status: Enabled
             ExpirationInDays: 90
+          - Id: AbortIncompleteMultipartUploads
+            Status: Enabled
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 7
       Tags:
         - Key: Project
           Value: voice-meeting-minutes
@@ -282,9 +296,22 @@ Resources:
       AttributeDefinitions:
         - AttributeName: job_id
           AttributeType: S
+        - AttributeName: email
+          AttributeType: S
+        - AttributeName: created_at
+          AttributeType: S
       KeySchema:
         - AttributeName: job_id
           KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: email-created_at-index
+          KeySchema:
+            - AttributeName: email
+              KeyType: HASH
+            - AttributeName: created_at
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
       Tags:
         - Key: Project
           Value: voice-meeting-minutes
@@ -306,14 +333,13 @@ Resources:
       Cors:
         AllowOrigin: "'*'"
         AllowMethods: "'GET,POST,OPTIONS'"
-        AllowHeaders: "'Content-Type,X-Api-Key'"
+        AllowHeaders: "'Content-Type,X-Api-Key,Authorization'"
       Auth:
-        ApiKeyRequired: true
-        UsagePlan:
-          CreateUsagePlan: PER_API
-          Throttle:
-            RateLimit: 10
-            BurstLimit: 20
+        DefaultAuthorizer: CognitoAuth
+        AddDefaultAuthorizerToCorsPreflight: false
+        Authorizers:
+          CognitoAuth:
+            UserPoolArn: !Sub "arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/ap-east-1_6BilvzaAu"
       Tags:
         Project: voice-meeting-minutes
         ManagedBy: AWS SAM
@@ -437,6 +463,24 @@ Resources:
                 StringEquals:
                   "aws:RequestedRegion": "ap-southeast-1"
 
+  ListJobsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: prod-voice-meeting-minutes-list-jobs
+      Handler: handler.lambda_handler
+      CodeUri: lambdas/list_jobs/
+      Timeout: 10
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref JobsTable
+      Events:
+        ListJobs:
+          Type: Api
+          Properties:
+            RestApiId: !Ref MeetingApi
+            Path: /jobs
+            Method: get
+
   GetStatusFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -454,6 +498,30 @@ Resources:
             RestApiId: !Ref MeetingApi
             Path: /jobs/{job_id}
             Method: get
+
+  # ---------------------------------------------------------------------------
+  # Scheduled Lambda — Cleanup orphan uploads (status=uploaded > 24h)
+  # ---------------------------------------------------------------------------
+  CleanupOrphansFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: prod-voice-meeting-minutes-cleanup-orphans
+      Handler: handler.lambda_handler
+      CodeUri: lambdas/cleanup_orphans/
+      Timeout: 300
+      MemorySize: 256
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref JobsTable
+        - S3CrudPolicy:
+            BucketName: !Ref DataBucket
+      Events:
+        DailySchedule:
+          Type: Schedule
+          Properties:
+            Schedule: cron(0 0 * * ? *)
+            Description: Daily cleanup of orphan uploads older than 24h
+            Enabled: true
 
   # ---------------------------------------------------------------------------
   # Step Functions
@@ -629,6 +697,8 @@ Resources:
             Principal:
               Service: ecs-tasks.amazonaws.com
             Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
       Policies:
         - PolicyName: S3Access
           PolicyDocument:
@@ -670,7 +740,9 @@ Resources:
         DesiredvCpus: 0
         InstanceTypes:
           - g4dn.xlarge
-        ImageId: !If [HasCustomAmi, !Ref ProcessorAmiId, !Ref "AWS::NoValue"]
+        Ec2Configuration:
+          - ImageType: ECS_AL2023_NVIDIA
+            ImageIdOverride: !If [HasCustomAmi, !Ref ProcessorAmiId, !Ref "AWS::NoValue"]
         Subnets:
           - !Ref PublicSubnet1a
           - !Ref PublicSubnet1b
@@ -715,20 +787,6 @@ Resources:
             Value: "1"
         JobRoleArn: !GetAtt BatchJobRole.Arn
         ExecutionRoleArn: !GetAtt BatchJobRole.Arn
-        Volumes:
-          - Name: processor
-            Host:
-              SourcePath: /opt/processor
-          - Name: local-bin
-            Host:
-              SourcePath: /usr/local/bin
-        MountPoints:
-          - ContainerPath: /opt/processor
-            SourceVolume: processor
-            ReadOnly: true
-          - ContainerPath: /usr/local/bin
-            SourceVolume: local-bin
-            ReadOnly: true
         LogConfiguration:
           LogDriver: awslogs
           Options:
@@ -959,9 +1017,9 @@ Resources:
     Properties:
       Name: prod-voice-meeting-minutes-processor-setup
       Platform: Linux
-      Version: "1.0.6"
-      Description: Install Python 3.11, ML packages, and pre-download models
-      Uri: s3://aws-sam-cli-managed-default-samclisourcebucket-dbwfevuthl4p/imagebuilder/component-v6.json
+      Version: "1.0.7"
+      Description: Install Python, ML packages (Whisper, pyannote, GOT-OCR), pre-download models
+      Uri: !Sub "s3://prod-voice-meeting-minutes-data-${AWS::AccountId}/imagebuilder/component.json"
       Tags:
         Project: voice-meeting-minutes
         ManagedBy: AWS SAM
@@ -972,14 +1030,14 @@ Resources:
     Type: AWS::ImageBuilder::ImageRecipe
     Properties:
       Name: prod-voice-meeting-minutes-processor-recipe
-      Version: "1.0.6"
+      Version: "1.0.7"
       ParentImage: !Sub "{{resolve:ssm:/aws/service/ecs/optimized-ami/amazon-linux-2023/gpu/recommended/image_id}}"
       Components:
         - ComponentArn: !Ref ImageBuilderComponent
       BlockDeviceMappings:
         - DeviceName: /dev/xvda
           Ebs:
-            VolumeSize: 100
+            VolumeSize: 35
             VolumeType: gp3
       Tags:
         Project: voice-meeting-minutes
@@ -1037,6 +1095,99 @@ Resources:
         Env: PROD
         created-by: austin.leung@ecloudvalley.com
 
+  # ---------------------------------------------------------------------------
+  # Frontend S3 Bucket + CloudFront
+  # ---------------------------------------------------------------------------
+  FrontendBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "prod-voice-meeting-minutes-frontend-${AWS::AccountId}"
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        - Key: Project
+          Value: voice-meeting-minutes
+        - Key: ManagedBy
+          Value: AWS SAM
+        - Key: Env
+          Value: PROD
+        - Key: created-by
+          Value: austin.leung@ecloudvalley.com
+
+  FrontendBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref FrontendBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowCloudFrontOAC
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub "${FrontendBucket.Arn}/*"
+            Condition:
+              StringEquals:
+                "AWS:SourceArn": !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistribution}"
+
+  CloudFrontOAC:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: prod-voice-meeting-minutes-oac
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  CloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: "Precis — Meeting Minutes Frontend"
+        DefaultRootObject: index.html
+        HttpVersion: http2and3
+        PriceClass: PriceClass_200
+        Origins:
+          - Id: S3Origin
+            DomainName: !GetAtt FrontendBucket.RegionalDomainName
+            S3OriginConfig:
+              OriginAccessIdentity: ""
+            OriginAccessControlId: !GetAtt CloudFrontOAC.Id
+        DefaultCacheBehavior:
+          TargetOriginId: S3Origin
+          ViewerProtocolPolicy: redirect-to-https
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6  # CachingOptimized
+          Compress: true
+          AllowedMethods:
+            - GET
+            - HEAD
+          CachedMethods:
+            - GET
+            - HEAD
+        CustomErrorResponses:
+          - ErrorCode: 403
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+            ErrorCachingMinTTL: 0
+          - ErrorCode: 404
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+            ErrorCachingMinTTL: 0
+      Tags:
+        - Key: Project
+          Value: voice-meeting-minutes
+        - Key: ManagedBy
+          Value: AWS SAM
+        - Key: Env
+          Value: PROD
+        - Key: created-by
+          Value: austin.leung@ecloudvalley.com
+
 # =============================================================================
 # Outputs
 # =============================================================================
@@ -1084,3 +1235,12 @@ Outputs:
   ImageBuilderPipelineArn:
     Description: EC2 Image Builder pipeline ARN (run to build custom AMI)
     Value: !Ref ImageBuilderPipeline
+
+  CloudFrontUrl:
+    Description: Frontend URL (CloudFront)
+    Value: !Sub "https://${CloudFrontDistribution.DomainName}"
+
+  FrontendBucketName:
+    Description: Frontend S3 bucket name
+    Value: !Ref FrontendBucket
+

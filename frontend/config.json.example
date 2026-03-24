@@ -1,0 +1,7 @@
+{
+    "API_URL": "https://xxxxxx.execute-api.ap-east-1.amazonaws.com/prod",
+    "API_KEY": "your-api-key-here",
+    "COGNITO_DOMAIN": "ecvhk-internal.auth.ap-east-1.amazoncognito.com",
+    "COGNITO_CLIENT_ID": "your-cognito-client-id",
+    "COGNITO_REDIRECT": "https://your-cloudfront-domain.cloudfront.net"
+}

@@ -20,8 +20,11 @@ import tempfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-# Models and packages are mounted from host AMI at /opt/processor
-os.environ.setdefault("HF_HOME", "/opt/processor/models")
+# Models: 優先用 host AMI 預裝嘅，fallback 到 default cache（fat container 模式會下載）
+if os.path.isdir("/opt/processor/models"):
+    os.environ.setdefault("HF_HOME", "/opt/processor/models")
+else:
+    os.environ.setdefault("HF_HOME", "/tmp/models")
 
 import boto3
 

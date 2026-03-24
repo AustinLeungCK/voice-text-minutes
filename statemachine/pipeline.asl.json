@@ -138,6 +138,7 @@
         "email.$": "$.jobDetails.Item.email.S",
         "status": "completed"
       },
+      "ResultPath": "$.notifyResult",
       "Next": "UpdateStatusCompleted"
     },
     "UpdateStatusCompleted": {
@@ -175,6 +176,7 @@
         "status": "failed",
         "error.$": "$.error"
       },
+      "ResultPath": "$.notifyResult",
       "Next": "UpdateStatusFailed"
     },
     "UpdateStatusFailed": {

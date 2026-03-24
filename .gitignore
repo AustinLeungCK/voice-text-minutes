@@ -16,8 +16,12 @@ output/
 *.pem
 .aws-sam/
 
+# Frontend config (contains API key)
+frontend/config.json
+
 # Python venv artifacts (pip installs to project dir via C:\Python314 venv)
 Lib/
 Scripts/
 share/
 pyvenv.cfg
+tests/
