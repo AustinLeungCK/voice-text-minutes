@@ -796,10 +796,13 @@ Resources:
         MountPoints:
           - ContainerPath: /opt/processor
             SourceVolume: processor
-            ReadOnly: true
+            ReadOnly: false
           - ContainerPath: /usr/local/bin
             SourceVolume: ffmpeg
             ReadOnly: true
+        Environment:
+          - Name: HF_TOKEN
+            Value: "{{resolve:secretsmanager:prod-voice-meeting-minutes/hf-token:SecretString:HF_TOKEN}}"
         JobRoleArn: !GetAtt BatchJobRole.Arn
         ExecutionRoleArn: !GetAtt BatchJobRole.Arn
         LogConfiguration:

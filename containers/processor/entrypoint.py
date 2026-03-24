@@ -134,8 +134,10 @@ def run_diarize(wav_path):
     import torch
     from pyannote.audio import Pipeline
 
+    hf_token = os.environ.get("HF_TOKEN")
     pipeline = Pipeline.from_pretrained(
         "pyannote/speaker-diarization-3.1",
+        use_auth_token=hf_token,
     )
     # Force CPU
     pipeline.to(torch.device("cpu"))
