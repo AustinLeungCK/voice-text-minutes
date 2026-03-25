@@ -256,7 +256,7 @@ def run_ocr(mp4_path):
         def _ocr_image(image_path):
             image = Image.open(str(image_path)).convert("RGB")
             inputs = processor(image, return_tensors="pt").to("cuda", torch.float16)
-            generated_ids = model.generate(**inputs, max_new_tokens=4096)
+            generated_ids = model.generate(**inputs, max_new_tokens=1024)
             return processor.decode(generated_ids[0], skip_special_tokens=True)
 
         # OCR participant names from first frame

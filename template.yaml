@@ -811,7 +811,7 @@ Resources:
         BidPercentage: 100
         SpotIamFleetRole: !GetAtt BatchSpotFleetRole.Arn
         MinvCpus: 0
-        MaxvCpus: 4
+        MaxvCpus: 12
         DesiredvCpus: 0
         InstanceTypes:
           - g4dn.xlarge
