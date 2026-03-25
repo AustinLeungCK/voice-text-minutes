@@ -216,16 +216,20 @@ def run_ocr(mp4_path):
     frames_dir = WORK_DIR / "frames"
     frames_dir.mkdir(exist_ok=True)
 
-    # Extract frames: 1 frame every 30 seconds for slides, first frame for names
+    # Extract frames using scene detection — only when the screen changes significantly
+    # (e.g., slide transitions, window switches). Much faster than fixed fps for typical
+    # meetings: 10-20 scene changes vs 120 fixed-interval frames for a 1-hour meeting.
     subprocess.run(
         [
             "ffmpeg", "-i", str(mp4_path),
-            "-vf", "fps=1/30", "-q:v", "2",
+            "-vf", "select=gt(scene\\,0.3),showinfo", "-vsync", "vfr", "-q:v", "2",
             str(frames_dir / "slide_%04d.jpg"), "-y",
         ],
         check=True,
         capture_output=True,
     )
+    slide_count = len(list(frames_dir.glob("slide_*.jpg")))
+    print(f"Scene detection extracted {slide_count} frames")
 
     # Extract first frame for participant names (Teams UI)
     subprocess.run(
@@ -267,16 +271,17 @@ def run_ocr(mp4_path):
             result["participant_names"] = names
             print(f"OCR found {len(names)} participant names")
 
-        # OCR slides
+        # OCR slides (scene-detected frames)
         slide_files = sorted(frames_dir.glob("slide_*.jpg"))
         for i, slide_path in enumerate(slide_files):
             if _shutting_down.is_set():
-                print(f"Interrupted during OCR at slide {i}, saving partial results")
+                print(f"Interrupted during OCR at slide {i}/{len(slide_files)}, saving partial results")
                 break
+            print(f"OCR slide {i+1}/{len(slide_files)}...")
             slide_text = _ocr_image(slide_path)
             if slide_text.strip():
                 result["slide_contents"].append({
-                    "timestamp": i * 30,
+                    "slide_index": i,
                     "text": slide_text.strip(),
                 })
 
