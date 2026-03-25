@@ -7,14 +7,13 @@ Flow:
 2. Extract audio (ffmpeg) → WAV
 3. Sequential GPU pipeline (each stage clears VRAM before the next):
    a. Whisper STT (faster-whisper, large-v3-turbo)
-   b. pyannote speaker diarization
-   c. GOT-OCR2.0 for participant names + slides
+   b. GOT-OCR2.0 for participant names + slides
+   c. pyannote speaker diarization (num_speakers from OCR participant count)
 4. Upload results to S3
 
-All three GPU stages run sequentially rather than in parallel because
-diarization on CPU takes 25-40 min for a 1-hour meeting, while the full
-sequential GPU pipeline (Whisper → diarize → OCR) completes in ~12 min.
-T4 16GB VRAM is sufficient (peak ~3GB per stage).
+OCR runs before diarization so the Teams UI participant count can constrain
+pyannote's num_speakers, ensuring speaker clusters match the actual attendee list.
+All three GPU stages run sequentially; T4 16GB VRAM is sufficient (~3GB per stage).
 
 Spot handling:
 - SIGTERM → upload whatever results are done, then exit
@@ -116,32 +115,46 @@ def main():
     )
     print(f"Audio extracted: {wav_path.stat().st_size / 1e6:.1f} MB")
 
-    # Step 3–5: Sequential GPU pipeline (Whisper → Diarization → OCR)
-    # Each stage checkpointed to S3 for Spot resume
+    # Step 3–5: Sequential GPU pipeline (Whisper → OCR → Diarization)
+    # OCR runs before diarize so we can pass num_speakers from the Teams UI
+    # participant count to pyannote, constraining it to the actual attendee list.
+    # Each stage checkpointed to S3 for Spot resume.
     results = {}
 
-    stages = [
-        ("whisper", lambda: run_whisper(wav_path)),
-        ("diarize", lambda: run_diarize(wav_path)),
-        ("ocr", lambda: run_ocr(mp4_path)),
-    ]
+    # --- Whisper ---
+    results["whisper"] = _run_stage("whisper", lambda: run_whisper(wav_path))
 
-    for name, fn in stages:
-        if _shutting_down.is_set():
-            print(f"Interrupted before {name}, exiting.")
-            sys.exit(1)
+    # --- OCR (names + slides) ---
+    results["ocr"] = _run_stage("ocr", lambda: run_ocr(mp4_path))
 
-        if _checkpoint_exists(name):
-            print(f"Resuming: {name} found in S3, skipping")
-            results[name] = _download_result(name)
-            continue
-
-        print(f"Running {name}...")
-        results[name] = fn()
-        _upload_result(name, results[name])
-        print(f"{name} completed + checkpointed")
+    # --- Diarization (constrained by OCR participant count) ---
+    num_speakers = len(results["ocr"].get("participant_names", []))  if results["ocr"] else None
+    if num_speakers and num_speakers >= 2:
+        print(f"OCR detected {num_speakers} participants → constraining diarization")
+    else:
+        num_speakers = None  # let pyannote estimate
+    results["diarize"] = _run_stage(
+        "diarize", lambda: run_diarize(wav_path, num_speakers=num_speakers)
+    )
 
     print(f"Processor completed for job {JOB_ID}")
+
+
+def _run_stage(name, fn):
+    """Run a pipeline stage with checkpoint check and Spot interruption guard."""
+    if _shutting_down.is_set():
+        print(f"Interrupted before {name}, exiting.")
+        sys.exit(1)
+
+    if _checkpoint_exists(name):
+        print(f"Resuming: {name} found in S3, skipping")
+        return _download_result(name)
+
+    print(f"Running {name}...")
+    result = fn()
+    _upload_result(name, result)
+    print(f"{name} completed + checkpointed")
+    return result
 
 
 def run_whisper(wav_path):
@@ -175,8 +188,14 @@ def run_whisper(wav_path):
     }
 
 
-def run_diarize(wav_path):
-    """Run pyannote speaker diarization on GPU."""
+def run_diarize(wav_path, num_speakers=None):
+    """Run pyannote speaker diarization on GPU.
+
+    Args:
+        wav_path: Path to 16kHz mono WAV.
+        num_speakers: If set (from OCR participant count), constrains pyannote
+            to exactly this many speakers instead of letting it estimate.
+    """
     import soundfile as sf
     import torch
     from pyannote.audio import Pipeline
@@ -193,9 +212,12 @@ def run_diarize(wav_path):
     waveform, sample_rate = sf.read(str(wav_path), dtype="float32")
     waveform_tensor = torch.tensor(waveform).unsqueeze(0)
 
-    diarization = pipeline(
-        {"waveform": waveform_tensor, "sample_rate": sample_rate}
-    )
+    diarize_params = {"waveform": waveform_tensor, "sample_rate": sample_rate}
+    if num_speakers and num_speakers >= 2:
+        print(f"Constraining diarization to {num_speakers} speakers")
+        diarization = pipeline(diarize_params, num_speakers=num_speakers)
+    else:
+        diarization = pipeline(diarize_params)
 
     segments = []
     for turn, _, speaker in diarization.itertracks(yield_label=True):

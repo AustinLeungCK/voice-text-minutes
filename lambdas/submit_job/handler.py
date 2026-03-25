@@ -14,7 +14,7 @@ dynamodb = boto3.resource("dynamodb")
 
 JOBS_TABLE = os.environ["JOBS_TABLE"]
 DATA_BUCKET = os.environ["DATA_BUCKET"]
-REGION = os.environ.get("AWS_REGION", "ap-east-1")
+REGION = os.environ.get("AWS_REGION", "ap-northeast-2")
 
 s3_client = boto3.client(
     "s3",
@@ -27,9 +27,9 @@ s3_client = boto3.client(
 def lambda_handler(event, context):
     body = json.loads(event.get("body", "{}"))
 
-    # Email 從 Cognito token claims 攞（server-side enforce），fallback 到 body
-    claims = (event.get("requestContext") or {}).get("authorizer", {}).get("claims", {})
-    email = claims.get("email") or body.get("email")
+    # Email 從 Lambda authorizer context 攞（server-side enforce），fallback 到 body
+    authorizer = (event.get("requestContext") or {}).get("authorizer", {})
+    email = authorizer.get("email") or body.get("email")
     if not email:
         return _response(400, {"error": "email is required"})
 

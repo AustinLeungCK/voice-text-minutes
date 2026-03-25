@@ -10,7 +10,7 @@ import boto3
 from docx import Document
 from docx.shared import Pt, Inches, RGBColor
 
-REGION = os.environ.get("AWS_REGION", "ap-east-1")
+REGION = os.environ.get("AWS_REGION", "ap-northeast-2")
 s3_client = boto3.client(
     "s3",
     region_name=REGION,

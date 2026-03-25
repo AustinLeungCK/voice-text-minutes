@@ -7,14 +7,14 @@ ADMIN_EMAIL = "austin.leung@ecloudvalley.com"
 COGNITO_USER_POOL_ID = os.environ["COGNITO_USER_POOL_ID"]
 SES_REGION = os.environ.get("SES_REGION", "ap-southeast-1")
 
-cognito = boto3.client("cognito-idp")
+cognito = boto3.client("cognito-idp", region_name=os.environ.get("COGNITO_REGION", "ap-east-1"))
 ses = boto3.client("ses", region_name=SES_REGION)
 
 
 def lambda_handler(event, context):
     # --- Admin check ---
-    claims = (event.get("requestContext") or {}).get("authorizer", {}).get("claims", {})
-    caller_email = claims.get("email")
+    authorizer = (event.get("requestContext") or {}).get("authorizer", {})
+    caller_email = authorizer.get("email")
     if caller_email != ADMIN_EMAIL:
         return _response(403, {"error": "Admin access required"})
 

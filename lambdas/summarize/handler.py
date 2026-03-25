@@ -10,13 +10,13 @@ logger.setLevel(logging.INFO)
 
 s3_client = boto3.client("s3")
 dynamodb = boto3.resource("dynamodb")
-bedrock = boto3.client("bedrock-runtime", region_name=os.environ.get("BEDROCK_REGION", "ap-northeast-1"))
+bedrock = boto3.client("bedrock-runtime", region_name=os.environ.get("BEDROCK_REGION", "ap-northeast-2"))
 
 JOBS_TABLE = os.environ["JOBS_TABLE"]
 
-# DeepSeek V3.2 context is 164K tokens. Most 1-hour meetings produce
+# Claude Sonnet 4.6 has 200K context. Most 1-hour meetings produce
 # 50K-80K tokens, so chunking is rarely needed.
-MAX_TRANSCRIPT_CHARS = 400_000  # ~100K tokens, safe for 164K context
+MAX_TRANSCRIPT_CHARS = 500_000  # ~125K tokens, safe for 200K context
 CHUNK_SIZE_CHARS = 200_000
 
 # max_tokens by summary_length — "detailed" needs more room for tables/subsections
@@ -52,7 +52,7 @@ def lambda_handler(event, context):
     custom = requirements.get("custom_instructions", "").strip()
 
     if len(transcript) <= MAX_TRANSCRIPT_CHARS:
-        minutes = _call_deepseek(system_prompt, transcript, max_tokens, custom)
+        minutes = _call_claude(system_prompt, transcript, max_tokens, custom)
     else:
         minutes = _chunked_summarize(system_prompt, transcript, requirements, max_tokens, custom)
 
@@ -116,9 +116,10 @@ def _build_system_prompt(req):
 用 2-3 句概括整個會議嘅核心內容同目的。
 
 ## 2. 與會者
-列出所有與會者嘅真實姓名。如果轉錄稿有 PARTICIPANTS 列表，以此為準。
+如果轉錄稿有 PARTICIPANTS 列表，以此為準列出所有與會者嘅真實姓名。
 即使某人全程無發言，只要出現喺與會者名單，都要列出。
-如果只有 SPEAKER_XX 標籤而無法確認真名，保留標籤但嘗試從對話上下文推斷身份。
+如果轉錄稿入面仲有 SPEAKER_XX 標籤，根據上下文對應返去 PARTICIPANTS 入面嘅真實姓名。
+禁止用「(likely X)」或「(可能係 X)」呢類猜測標註。如果真係無法確認，直接用 SPEAKER_XX。
 
 ## 3. 討論內容
 按主題分 subsection（### 3.1, 3.2, ...）。每個要點必須標明係邊個提出。
@@ -142,29 +143,26 @@ def _build_system_prompt(req):
     return prompt
 
 
-def _call_deepseek(system_prompt, transcript, max_tokens=4096, custom_instructions=""):
+def _call_claude(system_prompt, transcript, max_tokens=4096, custom_instructions=""):
     user_content = f"以下是會議轉錄稿，請生成會議紀錄：\n\n{transcript}"
     if custom_instructions:
         user_content += f"\n\n---\n用戶額外要求：{custom_instructions}"
 
     try:
         response = bedrock.invoke_model(
-            modelId="deepseek.v3.2",
-            body=json.dumps(
-                {
-                    "messages": [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_content},
-                    ],
-                    "max_tokens": max_tokens,
-                    "temperature": 0.1,
-                }
-            ),
+            modelId="anthropic.claude-sonnet-4-6-20250514-v1:0",
+            body=json.dumps({
+                "anthropic_version": "bedrock-2023-05-31",
+                "system": system_prompt,
+                "messages": [{"role": "user", "content": user_content}],
+                "max_tokens": max_tokens,
+                "temperature": 0.1,
+            }),
             contentType="application/json",
             accept="application/json",
         )
         result = json.loads(response["body"].read())
-        return result["choices"][0]["message"]["content"]
+        return result["content"][0]["text"]
     except ClientError as e:
         error_code = e.response["Error"]["Code"]
         logger.error("Bedrock ClientError [%s]: %s", error_code, e)
@@ -203,7 +201,7 @@ def _chunked_summarize(system_prompt, transcript, requirements, max_tokens=4096,
 
     # Step 1: Generate outline from first and last chunks (short output, 4096 is fine)
     outline_text = chunks[0][:50000] + "\n...\n" + chunks[-1][-50000:]
-    outline = _call_deepseek(
+    outline = _call_claude(
         "根據以下會議轉錄稿的開頭和結尾，生成一個簡要大綱（5-10個要點）。",
         outline_text,
     )
@@ -211,7 +209,7 @@ def _chunked_summarize(system_prompt, transcript, requirements, max_tokens=4096,
     # Step 2: Summarize each chunk with outline context
     chunk_summaries = []
     for i, chunk in enumerate(chunks):
-        summary = _call_deepseek(
+        summary = _call_claude(
             f"{system_prompt}\n\n參考大綱：\n{outline}\n\n"
             f"這是第 {i + 1}/{len(chunks)} 部分。請總結此部分的要點。",
             chunk,
@@ -222,7 +220,7 @@ def _chunked_summarize(system_prompt, transcript, requirements, max_tokens=4096,
 
     # Step 3: Merge all summaries into final minutes
     combined = "\n\n---\n\n".join(chunk_summaries)
-    final = _call_deepseek(
+    final = _call_claude(
         f"{system_prompt}\n\n"
         "以下是分段總結，請合併成一份完整的會議紀錄。去除重複內容，保持結構一致。",
         combined,

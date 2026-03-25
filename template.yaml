@@ -2,7 +2,7 @@ AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 Description: >
   prod-voice-meeting-minutes — Meeting recording to meeting minutes pipeline.
-  HK (ap-east-1) for processing, cross-region Bedrock (ap-northeast-1) for summarization,
+  Seoul (ap-northeast-2) for all processing, HK Cognito (ap-east-1) for auth,
   cross-region SES (ap-southeast-1) for email.
 
 # =============================================================================
@@ -16,7 +16,7 @@ Parameters:
 
   ProcessorImageUri:
     Type: String
-    Default: "036293420772.dkr.ecr.ap-east-1.amazonaws.com/prod-voice-meeting-minutes-processor:latest"
+    Default: "036293420772.dkr.ecr.ap-northeast-2.amazonaws.com/prod-voice-meeting-minutes-processor:latest"
     Description: ECR image URI for processor container (update after first push)
 
   ProcessorAmiId:
@@ -39,7 +39,8 @@ Globals:
         JOBS_TABLE: !Ref JobsTable
         DATA_BUCKET: !Ref DataBucket
         SES_REGION: ap-southeast-1
-        BEDROCK_REGION: ap-northeast-1
+        BEDROCK_REGION: ap-northeast-2
+        COGNITO_REGION: ap-east-1
         SES_FROM_EMAIL: !Ref SESFromEmail
     Tags:
       Project: voice-meeting-minutes
@@ -243,7 +244,7 @@ Resources:
   DataBucket:
     Type: AWS::S3::Bucket
     Properties:
-      BucketName: !Sub "prod-voice-meeting-minutes-data-${AWS::AccountId}"
+      BucketName: !Sub "prod-voice-meeting-minutes-data-${AWS::AccountId}-ap-northeast-2"
       CorsConfiguration:
         CorsRules:
           - AllowedOrigins:
@@ -327,16 +328,36 @@ Resources:
         AllowMethods: "'GET,POST,DELETE,OPTIONS'"
         AllowHeaders: "'Content-Type,X-Api-Key,Authorization'"
       Auth:
-        DefaultAuthorizer: CognitoAuth
+        DefaultAuthorizer: LambdaAuth
         AddDefaultAuthorizerToCorsPreflight: false
         Authorizers:
-          CognitoAuth:
-            UserPoolArn: !Sub "arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/ap-east-1_6BilvzaAu"
+          LambdaAuth:
+            FunctionArn: !GetAtt AuthorizerFunction.Arn
+            FunctionPayloadType: TOKEN
+            Identity:
+              Header: Authorization
+              ReauthorizeEvery: 300
       Tags:
         Project: voice-meeting-minutes
         ManagedBy: AWS SAM
         Env: PROD
         created-by: austin.leung@ecloudvalley.com
+
+  # ---------------------------------------------------------------------------
+  # Lambda — Authorizer (validates HK Cognito JWT for Seoul API Gateway)
+  # ---------------------------------------------------------------------------
+  AuthorizerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: prod-voice-meeting-minutes-authorizer
+      Handler: handler.lambda_handler
+      CodeUri: lambdas/authorizer/
+      Timeout: 10
+      MemorySize: 128
+      Environment:
+        Variables:
+          COGNITO_USER_POOL_ID: ap-east-1_6BilvzaAu
+          COGNITO_CLIENT_ID: 1q6id8nmmri2olooak025gscd5
 
   # ---------------------------------------------------------------------------
   # Lambda Functions
@@ -428,7 +449,7 @@ Resources:
               Condition:
                 StringEquals:
                   "aws:RequestedRegion":
-                    - "ap-northeast-1"
+                    - "ap-northeast-2"
 
   NotifyFunction:
     Type: AWS::Serverless::Function
@@ -513,7 +534,7 @@ Resources:
               Condition:
                 StringEquals:
                   "aws:RequestedRegion":
-                    - "ap-northeast-1"
+                    - "ap-northeast-2"
       Events:
         RefineMinutes:
           Type: Api
@@ -561,6 +582,7 @@ Resources:
       Environment:
         Variables:
           COGNITO_USER_POOL_ID: ap-east-1_6BilvzaAu
+          COGNITO_REGION: ap-east-1
       Policies:
         - Version: "2012-10-17"
           Statement:
@@ -570,7 +592,7 @@ Resources:
                 - cognito-idp:AdminSetUserPassword
                 - cognito-idp:AdminDeleteUser
                 - cognito-idp:ListUsers
-              Resource: !Sub "arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/ap-east-1_6BilvzaAu"
+              Resource: !Sub "arn:aws:cognito-idp:ap-east-1:${AWS::AccountId}:userpool/ap-east-1_6BilvzaAu"
             - Effect: Allow
               Action:
                 - ses:VerifyEmailIdentity
@@ -840,7 +862,8 @@ Resources:
         MaxvCpus: 4  # CLI set to 12, update via CF after jobs drain
         DesiredvCpus: 0
         InstanceTypes:
-          - g4dn.xlarge
+          - g6.xlarge      # L4 24GB — primary
+          - g4dn.xlarge    # T4 16GB — fallback
         Ec2Configuration:
           - ImageType: ECS_AL2023_NVIDIA
             ImageIdOverride: !Ref ProcessorAmiId
@@ -1018,7 +1041,7 @@ Resources:
         Type: NO_ARTIFACTS
       Source:
         Type: CODECOMMIT
-        Location: https://git-codecommit.ap-east-1.amazonaws.com/v1/repos/prod-voice-meeting-minutes
+        Location: https://git-codecommit.ap-northeast-2.amazonaws.com/v1/repos/prod-voice-meeting-minutes
         GitCloneDepth: 1
         BuildSpec: !Sub |
           version: 0.2
@@ -1180,7 +1203,7 @@ Resources:
       Name: prod-voice-meeting-minutes-infra-config
       InstanceProfileName: !Ref ImageBuilderInstanceProfile
       InstanceTypes:
-        - g4dn.xlarge
+        - g6.xlarge      # L4 — ensure driver compatibility with Batch
       SubnetId: !Ref PublicSubnet1a
       SecurityGroupIds:
         - !Ref BatchSecurityGroup
@@ -1230,7 +1253,7 @@ Resources:
   FrontendBucket:
     Type: AWS::S3::Bucket
     Properties:
-      BucketName: !Sub "prod-voice-meeting-minutes-frontend-${AWS::AccountId}"
+      BucketName: !Sub "prod-voice-meeting-minutes-frontend-${AWS::AccountId}-ap-northeast-2"
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
         BlockPublicPolicy: true
@@ -1293,7 +1316,7 @@ Resources:
             ReferrerPolicy: strict-origin-when-cross-origin
             Override: true
           ContentSecurityPolicy:
-            ContentSecurityPolicy: "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self' https://yelhrrcfd7.execute-api.ap-east-1.amazonaws.com https://cognito-idp.ap-east-1.amazonaws.com https://s3.ap-east-1.amazonaws.com; img-src 'self' data:; frame-ancestors 'none'; base-uri 'self'; form-action 'self';"
+            ContentSecurityPolicy: "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self' https://*.execute-api.ap-northeast-2.amazonaws.com https://cognito-idp.ap-east-1.amazonaws.com https://s3.ap-northeast-2.amazonaws.com; img-src 'self' data:; frame-ancestors 'none'; base-uri 'self'; form-action 'self';"
             Override: true
     # Note: AWS::CloudFront::ResponseHeadersPolicy does not support Tags.
 

@@ -9,9 +9,9 @@ JOBS_TABLE = os.environ["JOBS_TABLE"]
 
 
 def lambda_handler(event, context):
-    # Email 從 Cognito token claims 攞（server-side enforce）
-    claims = (event.get("requestContext") or {}).get("authorizer", {}).get("claims", {})
-    email = claims.get("email")
+    # Email 從 Lambda authorizer context 攞（server-side enforce）
+    authorizer = (event.get("requestContext") or {}).get("authorizer", {})
+    email = authorizer.get("email")
 
     if not email:
         return _response(401, {"error": "unauthorized"})

@@ -18,13 +18,9 @@ def lambda_handler(event, context):
     if not job_id:
         return _response(400, {"error": "job_id is required"})
 
-    # --- Extract caller email from Cognito claims ---
-    claims = (
-        (event.get("requestContext") or {})
-        .get("authorizer", {})
-        .get("claims", {})
-    )
-    caller_email = claims.get("email")
+    # --- Extract caller email from Lambda authorizer context ---
+    authorizer = (event.get("requestContext") or {}).get("authorizer", {})
+    caller_email = authorizer.get("email")
     if not caller_email:
         return _response(401, {"error": "unauthorized"})
 

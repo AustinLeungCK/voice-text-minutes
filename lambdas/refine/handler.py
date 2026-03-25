@@ -5,7 +5,7 @@ import boto3
 
 s3_client = boto3.client("s3")
 dynamodb = boto3.resource("dynamodb")
-bedrock = boto3.client("bedrock-runtime", region_name=os.environ.get("BEDROCK_REGION", "ap-northeast-1"))
+bedrock = boto3.client("bedrock-runtime", region_name=os.environ.get("BEDROCK_REGION", "ap-northeast-2"))
 
 JOBS_TABLE = os.environ["JOBS_TABLE"]
 DATA_BUCKET = os.environ["DATA_BUCKET"]
@@ -22,13 +22,9 @@ def lambda_handler(event, context):
     if not job_id:
         return _response(400, {"error": "job_id is required"})
 
-    # --- Extract caller email from Cognito claims ---
-    claims = (
-        (event.get("requestContext") or {})
-        .get("authorizer", {})
-        .get("claims", {})
-    )
-    caller_email = claims.get("email")
+    # --- Extract caller email from Lambda authorizer context ---
+    authorizer = (event.get("requestContext") or {}).get("authorizer", {})
+    caller_email = authorizer.get("email")
     if not caller_email:
         return _response(401, {"error": "unauthorized"})
 
@@ -75,7 +71,7 @@ def lambda_handler(event, context):
     except s3_client.exceptions.NoSuchKey:
         return _response(404, {"error": "Meeting minutes not found"})
 
-    # --- Call Bedrock DeepSeek V3.2 ---
+    # --- Call Bedrock Claude Sonnet 4.6 ---
     user_message = (
         f"原始轉錄稿：\n{transcript}\n\n"
         f"現有會議紀錄：\n{current_minutes}\n\n"
@@ -85,22 +81,19 @@ def lambda_handler(event, context):
 
     try:
         response = bedrock.invoke_model(
-            modelId="deepseek.v3.2",
-            body=json.dumps(
-                {
-                    "messages": [
-                        {"role": "system", "content": SYSTEM_PROMPT},
-                        {"role": "user", "content": user_message},
-                    ],
-                    "max_tokens": 8192,
-                    "temperature": 0.1,
-                }
-            ),
+            modelId="anthropic.claude-sonnet-4-6-20250514-v1:0",
+            body=json.dumps({
+                "anthropic_version": "bedrock-2023-05-31",
+                "system": SYSTEM_PROMPT,
+                "messages": [{"role": "user", "content": user_message}],
+                "max_tokens": 8192,
+                "temperature": 0.1,
+            }),
             contentType="application/json",
             accept="application/json",
         )
         result_body = json.loads(response["body"].read())
-        refined_minutes = result_body["choices"][0]["message"]["content"]
+        refined_minutes = result_body["content"][0]["text"]
     except Exception as e:
         print(f"Bedrock error for job {job_id}: {e}")
         return _response(502, {"error": "Failed to refine minutes"})
