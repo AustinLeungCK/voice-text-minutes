@@ -1,7 +1,12 @@
 import json
+import logging
 import os
 
 import boto3
+from botocore.exceptions import ClientError
+
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
 
 s3_client = boto3.client("s3")
 dynamodb = boto3.resource("dynamodb")
@@ -14,6 +19,15 @@ JOBS_TABLE = os.environ["JOBS_TABLE"]
 MAX_TRANSCRIPT_CHARS = 400_000  # ~100K tokens, safe for 164K context
 CHUNK_SIZE_CHARS = 200_000
 
+# max_tokens by summary_length — "detailed" needs more room for tables/subsections
+MAX_TOKENS_BY_LENGTH = {
+    "short": 4096,
+    "brief": 4096,
+    "concise": 4096,
+    "medium": 4096,
+    "detailed": 8192,
+}
+
 
 def lambda_handler(event, context):
     job_id = event["job_id"]
@@ -22,15 +36,25 @@ def lambda_handler(event, context):
 
     # Read merged transcript
     prefix = f"jobs/{job_id}"
-    resp = s3_client.get_object(Bucket=bucket, Key=f"{prefix}/merged_transcript.txt")
-    transcript = resp["Body"].read().decode("utf-8")
+    try:
+        resp = s3_client.get_object(Bucket=bucket, Key=f"{prefix}/merged_transcript.txt")
+        transcript = resp["Body"].read().decode("utf-8")
+    except ClientError as e:
+        if e.response["Error"]["Code"] == "NoSuchKey":
+            raise RuntimeError(
+                f"Transcript not found for job {job_id} — merge step may have failed"
+            ) from e
+        raise
 
     system_prompt = _build_system_prompt(requirements)
+    summary_length = requirements.get("summary_length", "medium")
+    max_tokens = MAX_TOKENS_BY_LENGTH.get(summary_length, 4096)
+    custom = requirements.get("custom_instructions", "").strip()
 
     if len(transcript) <= MAX_TRANSCRIPT_CHARS:
-        minutes = _call_deepseek(system_prompt, transcript)
+        minutes = _call_deepseek(system_prompt, transcript, max_tokens, custom)
     else:
-        minutes = _chunked_summarize(system_prompt, transcript, requirements)
+        minutes = _chunked_summarize(system_prompt, transcript, requirements, max_tokens, custom)
 
     s3_client.put_object(
         Bucket=bucket,
@@ -68,7 +92,6 @@ def _build_system_prompt(req):
     lang = req.get("output_language", "繁體中文")
     length = req.get("summary_length", "medium")
     fmt = req.get("output_format", "minutes")
-    custom = req.get("custom_instructions", "")
 
     length_guide = {"short": "約300字", "medium": "約800字", "detailed": "約1500字"}
     length_text = length_guide.get(length, "約800字")
@@ -116,37 +139,51 @@ def _build_system_prompt(req):
 - 唔好虛構任何資訊，所有內容必須來自轉錄稿
 - 保持專業、客觀嘅語氣"""
 
-    if custom:
-        prompt += f"\n- 額外要求：{custom}"
-
     return prompt
 
 
-def _call_deepseek(system_prompt, transcript):
-    response = bedrock.invoke_model(
-        modelId="deepseek.v3.2",
-        body=json.dumps(
-            {
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {
-                        "role": "user",
-                        "content": f"以下是會議轉錄稿，請生成會議紀錄：\n\n{transcript}",
-                    },
-                ],
-                "max_tokens": 4096,
-                "temperature": 0.1,
-            }
-        ),
-        contentType="application/json",
-        accept="application/json",
-    )
+def _call_deepseek(system_prompt, transcript, max_tokens=4096, custom_instructions=""):
+    user_content = f"以下是會議轉錄稿，請生成會議紀錄：\n\n{transcript}"
+    if custom_instructions:
+        user_content += f"\n\n---\n用戶額外要求：{custom_instructions}"
 
-    result = json.loads(response["body"].read())
-    return result["choices"][0]["message"]["content"]
+    try:
+        response = bedrock.invoke_model(
+            modelId="deepseek.v3.2",
+            body=json.dumps(
+                {
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_content},
+                    ],
+                    "max_tokens": max_tokens,
+                    "temperature": 0.1,
+                }
+            ),
+            contentType="application/json",
+            accept="application/json",
+        )
+        result = json.loads(response["body"].read())
+        return result["choices"][0]["message"]["content"]
+    except ClientError as e:
+        error_code = e.response["Error"]["Code"]
+        logger.error("Bedrock ClientError [%s]: %s", error_code, e)
+        raise RuntimeError(
+            f"Bedrock API error ({error_code}): {e}"
+        ) from e
+    except (KeyError, IndexError, json.JSONDecodeError) as e:
+        logger.error("Bedrock response parsing error: %s", e)
+        raise RuntimeError(
+            f"Bedrock returned malformed response: {e}"
+        ) from e
+    except Exception as e:
+        logger.error("Unexpected Bedrock error: %s", e)
+        raise RuntimeError(
+            f"Unexpected error calling Bedrock: {e}"
+        ) from e
 
 
-def _chunked_summarize(system_prompt, transcript, requirements):
+def _chunked_summarize(system_prompt, transcript, requirements, max_tokens=4096, custom_instructions=""):
     """Parent-child chunking for very long transcripts."""
     lines = transcript.split("\n")
     chunks = []
@@ -164,7 +201,7 @@ def _chunked_summarize(system_prompt, transcript, requirements):
     if current_chunk:
         chunks.append("\n".join(current_chunk))
 
-    # Step 1: Generate outline from first and last chunks
+    # Step 1: Generate outline from first and last chunks (short output, 4096 is fine)
     outline_text = chunks[0][:50000] + "\n...\n" + chunks[-1][-50000:]
     outline = _call_deepseek(
         "根據以下會議轉錄稿的開頭和結尾，生成一個簡要大綱（5-10個要點）。",
@@ -178,6 +215,8 @@ def _chunked_summarize(system_prompt, transcript, requirements):
             f"{system_prompt}\n\n參考大綱：\n{outline}\n\n"
             f"這是第 {i + 1}/{len(chunks)} 部分。請總結此部分的要點。",
             chunk,
+            max_tokens=max_tokens,
+            custom_instructions=custom_instructions,
         )
         chunk_summaries.append(summary)
 
@@ -187,6 +226,8 @@ def _chunked_summarize(system_prompt, transcript, requirements):
         f"{system_prompt}\n\n"
         "以下是分段總結，請合併成一份完整的會議紀錄。去除重複內容，保持結構一致。",
         combined,
+        max_tokens=max_tokens,
+        custom_instructions=custom_instructions,
     )
 
     return final

@@ -55,11 +55,15 @@ def lambda_handler(event, context):
     if output_format not in ALLOWED_OUTPUT_FORMATS:
         output_format = "minutes"
 
+    custom_instructions = body.get("custom_instructions", "")
+    if len(custom_instructions) > 500:
+        return _response(400, {"error": "custom_instructions must be 500 characters or fewer"})
+
     requirements = {
         "output_language": output_language,
         "summary_length": summary_length,
         "output_format": output_format,
-        "custom_instructions": body.get("custom_instructions", ""),
+        "custom_instructions": custom_instructions,
     }
 
     table = dynamodb.Table(JOBS_TABLE)
@@ -74,13 +78,24 @@ def lambda_handler(event, context):
         }
     )
 
+    ALLOWED_CONTENT_TYPES = {
+        "video/mp4",
+        "audio/mp4",
+        "audio/wav",
+        "video/x-matroska",
+        "application/octet-stream",
+    }
+    content_type = body.get("content_type", "application/octet-stream")
+    if content_type not in ALLOWED_CONTENT_TYPES:
+        content_type = "application/octet-stream"
+
     s3_key = f"jobs/{job_id}/input.mp4"
     presigned_url = s3_client.generate_presigned_url(
         "put_object",
         Params={
             "Bucket": DATA_BUCKET,
             "Key": s3_key,
-            "ContentType": "video/mp4",
+            "ContentType": content_type,
         },
         ExpiresIn=3600,
     )
@@ -103,5 +118,5 @@ def _response(status_code, body):
             "Content-Type": "application/json",
             "Access-Control-Allow-Origin": "https://minutes.msphk.info",
         },
-        "body": json.dumps(body),
+        "body": json.dumps(body, ensure_ascii=False),
     }

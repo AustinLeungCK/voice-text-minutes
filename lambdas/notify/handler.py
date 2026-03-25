@@ -9,7 +9,6 @@ from email.mime.text import MIMEText
 import boto3
 from docx import Document
 from docx.shared import Pt, Inches, RGBColor
-from docx.enum.text import WD_ALIGN_PARAGRAPH
 
 REGION = os.environ.get("AWS_REGION", "ap-east-1")
 s3_client = boto3.client(
@@ -41,13 +40,6 @@ def lambda_handler(event, context):
         _send_success_email(job_id, email, file_name)
     else:
         _send_failure_email(job_id, email, error, file_name)
-
-    table.update_item(
-        Key={"job_id": job_id},
-        UpdateExpression="SET #s = :status",
-        ExpressionAttributeNames={"#s": "status"},
-        ExpressionAttributeValues={":status": status},
-    )
 
     return {"status": "notified", "email": email}
 

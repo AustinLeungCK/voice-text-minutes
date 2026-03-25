@@ -846,6 +846,8 @@ Resources:
             Action: RETRY
           - OnExitCode: "0"
             Action: EXIT
+          - OnExitCode: "*"
+            Action: EXIT
       Timeout:
         AttemptDurationSeconds: 3600
       Tags:

@@ -104,7 +104,8 @@ async function changePassword(oldPassword, newPassword) {
 function _completeAuth(data, email) {
     const idToken = data.AuthenticationResult.IdToken;
     const accessToken = data.AuthenticationResult.AccessToken;
-    const payload = JSON.parse(atob(idToken.split('.')[1]));
+    const b64 = idToken.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+    const payload = JSON.parse(atob(b64));
     const user = {
         email: payload.email || email,
         name: payload.name || payload.email || email,
@@ -137,6 +138,16 @@ function authHeaders() {
         'Content-Type': 'application/json',
         'Authorization': currentUser?.token || '',
     };
+}
+
+// Wrapper for API fetch calls — auto-logout on 401 (expired token)
+async function apiFetch(url, options = {}) {
+    const res = await fetch(url, options);
+    if (res.status === 401) {
+        logout();
+        throw new Error('Session expired — please sign in again');
+    }
+    return res;
 }
 
 function logout() {
@@ -384,7 +395,7 @@ function applyI18n() {
     document.querySelectorAll('[data-i18n]').forEach(el => {
         const key = el.getAttribute('data-i18n');
         const text = t(key);
-        if (text.includes('<')) {
+        if (el.hasAttribute('data-i18n-html')) {
             el.innerHTML = text;
         } else {
             el.textContent = text;
@@ -432,7 +443,6 @@ function initTheme() {
 
 // --- DOM ---
 const stepsEl = {};
-const form = (() => document.getElementById('requirements-form'))();
 let fileInput, uploadArea, progressContainer, progressFill, progressText, fileNameEl, fileSizeEl, errorBanner, errorMessage;
 
 function initDom() {
@@ -530,10 +540,24 @@ function initFormHandler() {
     });
 }
 
+// Map file extension to MIME type for upload Content-Type header
+function getContentType(file) {
+    if (file.type) return file.type;
+    const ext = file.name.split('.').pop().toLowerCase();
+    const mimeMap = {
+        mp4: 'video/mp4',
+        m4a: 'audio/mp4',
+        wav: 'audio/wav',
+        mkv: 'video/x-matroska',
+    };
+    return mimeMap[ext] || 'application/octet-stream';
+}
+
 async function submitJobAndUpload(file) {
-    const payload = { ...pendingRequirements, file_name: file.name };
+    const contentType = getContentType(file);
+    const payload = { ...pendingRequirements, file_name: file.name, content_type: contentType };
     try {
-        const res = await fetch(`${CONFIG.API_URL}/jobs`, {
+        const res = await apiFetch(`${CONFIG.API_URL}/jobs`, {
             method: 'POST',
             headers: authHeaders(),
             body: JSON.stringify(payload),
@@ -545,7 +569,7 @@ async function submitJobAndUpload(file) {
         const data = await res.json();
         currentJobId = data.job_id;
         currentUploadUrl = data.upload_url;
-        uploadFile(file);
+        uploadFile(file, contentType);
     } catch (err) {
         showError(t('errSubmit') + err.message);
         resetUpload();
@@ -592,7 +616,7 @@ function handleFile(file) {
     submitJobAndUpload(file);
 }
 
-async function uploadFile(file) {
+async function uploadFile(file, contentType) {
     try {
         const xhr = new XMLHttpRequest();
         xhr.upload.addEventListener('progress', (e) => {
@@ -619,7 +643,7 @@ async function uploadFile(file) {
             resetUpload();
         });
         xhr.open('PUT', currentUploadUrl);
-        xhr.setRequestHeader('Content-Type', 'video/mp4');
+        xhr.setRequestHeader('Content-Type', contentType);
         xhr.send(file);
     } catch (err) {
         showError(t('errUpload') + err.message);
@@ -644,7 +668,7 @@ async function loadHistory() {
     const emptyEl = document.getElementById('history-empty');
 
     try {
-        const res = await fetch(
+        const res = await apiFetch(
             `${CONFIG.API_URL}/jobs`,
             { headers: { 'Authorization': currentUser?.token || '' } }
         );
@@ -733,7 +757,7 @@ async function showJobDetail(jobId, fileName) {
 
     // Fetch the meeting minutes markdown from API
     try {
-        const res = await fetch(`${CONFIG.API_URL}/jobs/${jobId}`, {
+        const res = await apiFetch(`${CONFIG.API_URL}/jobs/${jobId}`, {
             headers: { 'Authorization': currentUser?.token || '' }
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -747,8 +771,19 @@ async function showJobDetail(jobId, fileName) {
     }
 }
 
+function escapeHtml(str) {
+    return str
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
 function simpleMarkdownToHtml(md) {
-    return md
+    // Escape HTML entities first to prevent XSS from LLM-generated content,
+    // then apply markdown-to-HTML transformations on the safe string.
+    return escapeHtml(md)
         .replace(/^### (.+)$/gm, '<h4>$1</h4>')
         .replace(/^## (.+)$/gm, '<h3>$1</h3>')
         .replace(/^# (.+)$/gm, '<h2>$1</h2>')
@@ -756,8 +791,11 @@ function simpleMarkdownToHtml(md) {
         .replace(/\*(.+?)\*/g, '<em>$1</em>')
         .replace(/^\* (.+)$/gm, '<li>$1</li>')
         .replace(/^- (.+)$/gm, '<li>$1</li>')
-        .replace(/^\d+\. (.+)$/gm, '<li>$1</li>')
+        .replace(/^\d+\.\s+(.+)$/gm, '<oli>$1</oli>')
+        .replace(/(<oli>.*<\/oli>\n?)+/g, '<ol>$&</ol>')
         .replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>')
+        .replace(/<oli>/g, '<li>')
+        .replace(/<\/oli>/g, '</li>')
         .replace(/^---$/gm, '<hr>')
         .replace(/\n\n/g, '</p><p>')
         .replace(/\n/g, '<br>');
@@ -945,7 +983,7 @@ function initEventListeners() {
         document.getElementById('refine-submit').disabled = true;
 
         try {
-            const res = await fetch(`${CONFIG.API_URL}/jobs/${currentDetailJobId}/refine`, {
+            const res = await apiFetch(`${CONFIG.API_URL}/jobs/${currentDetailJobId}/refine`, {
                 method: 'POST',
                 headers: authHeaders(),
                 body: JSON.stringify({ instruction }),
@@ -966,12 +1004,9 @@ function initEventListeners() {
         }
     });
 
-    // Detail page — download DOCX
-    document.getElementById('detail-download').addEventListener('click', async () => {
-        // For now, just open the API endpoint that returns the DOCX
-        // This will be implemented when the download endpoint exists
-        showError('Download feature coming soon');
-    });
+    // Detail page — download DOCX: hidden because there is no presigned-URL
+    // download endpoint yet. Users already receive the DOCX via email (SES).
+    document.getElementById('detail-download').style.display = 'none';
 
     // Logout buttons
     document.getElementById('btn-logout').addEventListener('click', logout);

@@ -5,11 +5,16 @@ Runs on AWS Batch g4dn.xlarge (T4 16GB GPU + 4 vCPU + 16GB RAM).
 Flow:
 1. Download MP4 from S3
 2. Extract audio (ffmpeg) → WAV
-3. Parallel:
-   - Thread A (GPU): Whisper STT
-   - Thread B (CPU): pyannote diarization
-4. Sequential (GPU): GOT-OCR2.0 for participant names + slides
-5. Upload results to S3
+3. Sequential GPU pipeline (each stage clears VRAM before the next):
+   a. Whisper STT (faster-whisper, large-v3-turbo)
+   b. pyannote speaker diarization
+   c. GOT-OCR2.0 for participant names + slides
+4. Upload results to S3
+
+All three GPU stages run sequentially rather than in parallel because
+diarization on CPU takes 25-40 min for a 1-hour meeting, while the full
+sequential GPU pipeline (Whisper → diarize → OCR) completes in ~12 min.
+T4 16GB VRAM is sufficient (peak ~3GB per stage).
 
 Spot handling:
 - SIGTERM → upload whatever results are done, then exit
@@ -59,8 +64,10 @@ def _checkpoint_exists(name):
     try:
         s3_client.head_object(Bucket=S3_BUCKET, Key=f"{S3_PREFIX}/{name}_result.json")
         return True
-    except s3_client.exceptions.ClientError:
-        return False
+    except s3_client.exceptions.ClientError as e:
+        if e.response["Error"]["Code"] == "404":
+            return False
+        raise
 
 
 def _upload_result(name, data):

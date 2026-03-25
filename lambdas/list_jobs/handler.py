@@ -46,5 +46,5 @@ def _response(status_code, body):
             "Content-Type": "application/json",
             "Access-Control-Allow-Origin": "https://minutes.msphk.info",
         },
-        "body": json.dumps(body),
+        "body": json.dumps(body, ensure_ascii=False),
     }
