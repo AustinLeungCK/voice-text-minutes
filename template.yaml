@@ -1213,6 +1213,12 @@ Resources:
         DefaultRootObject: index.html
         HttpVersion: http2and3
         PriceClass: PriceClass_200
+        Aliases:
+          - minutes.msphk.info
+        ViewerCertificate:
+          AcmCertificateArn: arn:aws:acm:us-east-1:036293420772:certificate/e44e6653-680e-40ad-a819-632ae9df8b9e
+          SslSupportMethod: sni-only
+          MinimumProtocolVersion: TLSv1.2_2021
         Origins:
           - Id: S3Origin
             DomainName: !GetAtt FrontendBucket.RegionalDomainName
