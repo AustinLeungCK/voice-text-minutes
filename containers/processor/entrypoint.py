@@ -234,11 +234,11 @@ def run_ocr(mp4_path):
     result = {"participant_names": [], "slide_contents": []}
 
     try:
-        from transformers import AutoModel, AutoTokenizer
-
         import torch
+        from PIL import Image
+        from transformers import AutoModel, AutoProcessor
 
-        tokenizer = AutoTokenizer.from_pretrained(
+        processor = AutoProcessor.from_pretrained(
             "stepfun-ai/GOT-OCR-2.0-hf", trust_remote_code=True
         )
         model = AutoModel.from_pretrained(
@@ -246,13 +246,19 @@ def run_ocr(mp4_path):
             torch_dtype=torch.float16,
         ).to("cuda")
 
+        def _ocr_image(image_path):
+            image = Image.open(str(image_path)).convert("RGB")
+            inputs = processor(image, return_tensors="pt").to("cuda", torch.float16)
+            generated_ids = model.generate(**inputs, max_new_tokens=4096)
+            return processor.decode(generated_ids[0], skip_special_tokens=True)
+
         # OCR participant names from first frame
         names_img = frames_dir / "names.jpg"
         if names_img.exists():
-            names_text = model.chat(tokenizer, str(names_img), ocr_type="ocr")
-            # Parse names from OCR output
+            names_text = _ocr_image(names_img)
             names = [n.strip() for n in names_text.split("\n") if n.strip()]
             result["participant_names"] = names
+            print(f"OCR found {len(names)} participant names")
 
         # OCR slides
         slide_files = sorted(frames_dir.glob("slide_*.jpg"))
@@ -260,7 +266,7 @@ def run_ocr(mp4_path):
             if _shutting_down.is_set():
                 print(f"Interrupted during OCR at slide {i}, saving partial results")
                 break
-            slide_text = model.chat(tokenizer, str(slide_path), ocr_type="ocr")
+            slide_text = _ocr_image(slide_path)
             if slide_text.strip():
                 result["slide_contents"].append({
                     "timestamp": i * 30,
