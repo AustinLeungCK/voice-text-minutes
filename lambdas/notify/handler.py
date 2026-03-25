@@ -3,7 +3,13 @@ import os
 
 import boto3
 
-s3_client = boto3.client("s3")
+REGION = os.environ.get("AWS_REGION", "ap-east-1")
+s3_client = boto3.client(
+    "s3",
+    region_name=REGION,
+    endpoint_url=f"https://s3.{REGION}.amazonaws.com",
+    config=boto3.session.Config(signature_version="s3v4"),
+)
 ses_client = boto3.client("sesv2", region_name=os.environ.get("SES_REGION", "ap-southeast-1"))
 dynamodb = boto3.resource("dynamodb")
 
