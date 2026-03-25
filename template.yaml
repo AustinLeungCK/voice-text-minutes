@@ -523,6 +523,32 @@ Resources:
             Method: post
 
   # ---------------------------------------------------------------------------
+  # Lambda — Retry Failed Job
+  # ---------------------------------------------------------------------------
+  RetryJobFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: prod-voice-meeting-minutes-retry-job
+      Handler: handler.lambda_handler
+      CodeUri: lambdas/retry_job/
+      Timeout: 30
+      Environment:
+        Variables:
+          STATE_MACHINE_ARN: !Ref PipelineStateMachine
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref JobsTable
+        - StepFunctionsExecutionPolicy:
+            StateMachineName: !GetAtt PipelineStateMachine.Name
+      Events:
+        RetryJob:
+          Type: Api
+          Properties:
+            RestApiId: !Ref MeetingApi
+            Path: /jobs/{job_id}/retry
+            Method: post
+
+  # ---------------------------------------------------------------------------
   # Lambda — Admin User Management (Cognito)
   # ---------------------------------------------------------------------------
   AdminUsersFunction:
@@ -811,7 +837,7 @@ Resources:
         BidPercentage: 100
         SpotIamFleetRole: !GetAtt BatchSpotFleetRole.Arn
         MinvCpus: 0
-        MaxvCpus: 12
+        MaxvCpus: 4  # CLI set to 12, update via CF after jobs drain
         DesiredvCpus: 0
         InstanceTypes:
           - g4dn.xlarge

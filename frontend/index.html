@@ -112,6 +112,10 @@
                     <svg class="sidebar__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
                     <span data-i18n="navSettings">設定</span>
                 </button>
+                <button class="sidebar__item" data-page="admin" id="nav-admin" type="button" hidden>
+                    <svg class="sidebar__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                    <span data-i18n="navAdmin">用戶管理</span>
+                </button>
             </nav>
             <div class="sidebar__bottom">
                 <div class="sidebar__user" id="sidebar-user">
@@ -298,8 +302,13 @@
                         <!-- Rendered markdown goes here -->
                     </div>
 
+                    <div class="detail-error-area" id="detail-error-area" hidden>
+                        <p class="detail-error-message" id="detail-error-message"></p>
+                    </div>
+
                     <div class="detail-actions">
                         <button class="btn btn--primary" id="detail-download" type="button" data-i18n="downloadDocx">下載 DOCX</button>
+                        <button class="btn btn--secondary" id="detail-retry" type="button" data-i18n="retryJob" hidden>重試</button>
                     </div>
 
                     <div class="detail-refine">
@@ -348,27 +357,28 @@
                     </form>
 
                     <hr class="settings-divider">
-                    <div id="admin-section" hidden>
-                        <h3 class="settings-section-title" data-i18n="adminTitle">用戶管理</h3>
-                        <form id="admin-add-user-form" autocomplete="off">
-                            <div class="form-group">
-                                <label for="admin-new-email" data-i18n="adminEmail">新用戶 Email</label>
-                                <input type="email" id="admin-new-email" required>
-                            </div>
-                            <div class="form-group">
-                                <label for="admin-new-password" data-i18n="adminPassword">密碼</label>
-                                <input type="password" id="admin-new-password" required>
-                            </div>
-                            <p class="auth-hint" data-i18n="passwordHint">最少 8 個字，需要大小寫同數字</p>
-                            <p class="auth-error" id="admin-error" hidden></p>
-                            <p class="auth-success" id="admin-success" hidden></p>
-                            <button type="submit" class="btn btn--primary" data-i18n="adminAddUser">新增用戶</button>
-                        </form>
-                        <div id="admin-user-list" style="margin-top: 1.5rem;"></div>
-                    </div>
-
-                    <hr class="settings-divider">
                     <button class="btn btn--secondary" id="settings-logout" type="button" data-i18n="btnLogout">登出</button>
+                </div>
+            </div>
+            <!-- ===== Page: Admin (User Management) ===== -->
+            <div class="page" id="page-admin">
+                <div class="admin-card">
+                    <h2 class="wizard-card__title" data-i18n="adminTitle">用戶管理</h2>
+                    <form id="admin-add-user-form" autocomplete="off">
+                        <div class="form-group">
+                            <label for="admin-new-email" data-i18n="adminEmail">新用戶 Email</label>
+                            <input type="email" id="admin-new-email" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="admin-new-password" data-i18n="adminPassword">密碼</label>
+                            <input type="password" id="admin-new-password" required>
+                        </div>
+                        <p class="auth-hint" data-i18n="passwordHint">最少 8 個字，需要大小寫同數字</p>
+                        <p class="auth-error" id="admin-error" hidden></p>
+                        <p class="auth-success" id="admin-success" hidden></p>
+                        <button type="submit" class="btn btn--primary" data-i18n="adminAddUser">新增用戶</button>
+                    </form>
+                    <div id="admin-user-list" style="margin-top: 1.5rem;"></div>
                 </div>
             </div>
         </main>

@@ -174,12 +174,12 @@ function showApp() {
     // Settings 頁面顯示 email
     document.getElementById('settings-email').textContent = currentUser.email;
 
-    // Admin section — only visible to admin user
+    // Admin nav — only visible to admin user
+    const navAdmin = document.getElementById('nav-admin');
     if (currentUser?.email === 'austin.leung@ecloudvalley.com') {
-        document.getElementById('admin-section').hidden = false;
-        loadAdminUsers();
+        navAdmin.hidden = false;
     } else {
-        document.getElementById('admin-section').hidden = true;
+        navAdmin.hidden = true;
     }
 }
 
@@ -300,6 +300,10 @@ const I18N = {
         adminUserAdded: '用戶已新增',
         adminDeleteConfirm: '確定要刪除呢個用戶？',
         adminDelete: '刪除',
+        navAdmin: '用戶管理',
+        pageAdmin: '用戶管理',
+        retryJob: '重試',
+        retrySuccess: '已重新提交',
     },
     en: {
         logoSub: 'Precis',
@@ -404,6 +408,10 @@ const I18N = {
         adminUserAdded: 'User added successfully',
         adminDeleteConfirm: 'Delete this user?',
         adminDelete: 'Delete',
+        navAdmin: 'Users',
+        pageAdmin: 'User Management',
+        retryJob: 'Retry',
+        retrySuccess: 'Job resubmitted',
     },
 };
 
@@ -531,6 +539,7 @@ function showPage(pageName) {
     titleEl.setAttribute('data-i18n', titleKey);
 
     if (pageName === 'history') loadHistory();
+    if (pageName === 'admin') loadAdminUsers();
 }
 
 // --- Error ---
@@ -749,7 +758,7 @@ async function loadHistory() {
             badge.className = `history-item__badge history-item__badge--${statusClass}`;
             badge.textContent = statusText;
 
-            if (job.status === 'completed' || job.status === 'refined') {
+            if (job.status === 'completed' || job.status === 'refined' || job.status === 'failed') {
                 item.style.cursor = 'pointer';
                 item.addEventListener('click', () => showJobDetail(job.job_id, job.file_name));
             }
@@ -775,6 +784,12 @@ async function showJobDetail(jobId, fileName) {
     document.getElementById('refine-input').value = '';
     document.getElementById('refine-error').hidden = true;
 
+    // Reset visibility of detail-page elements
+    document.getElementById('detail-error-area').hidden = true;
+    document.getElementById('detail-retry').hidden = true;
+    document.getElementById('detail-download').style.display = '';
+    document.querySelector('.detail-refine').style.display = '';
+
     showPage('detail');
 
     // Fetch the meeting minutes markdown from API
@@ -785,17 +800,31 @@ async function showJobDetail(jobId, fileName) {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
 
-        // Simple markdown to HTML rendering (basic)
-        const html = simpleMarkdownToHtml(data.minutes || 'No content available');
-        document.getElementById('detail-minutes').innerHTML = html;
+        if (data.status === 'failed') {
+            // Show error message for failed jobs
+            const errorArea = document.getElementById('detail-error-area');
+            const errorMsg = document.getElementById('detail-error-message');
+            errorMsg.textContent = data.error_message || 'Unknown error';
+            errorArea.hidden = false;
 
-        // Show download button if DOCX is available
-        const dlBtn = document.getElementById('detail-download');
-        if (data.docx_url) {
-            dlBtn.style.display = '';
-            dlBtn.onclick = () => window.open(data.docx_url, '_blank');
+            // Show retry button, hide download and refine
+            document.getElementById('detail-retry').hidden = false;
+            document.getElementById('detail-download').style.display = 'none';
+            document.querySelector('.detail-refine').style.display = 'none';
+            document.getElementById('detail-minutes').innerHTML = '';
         } else {
-            dlBtn.style.display = 'none';
+            // Simple markdown to HTML rendering (basic)
+            const html = simpleMarkdownToHtml(data.minutes || 'No content available');
+            document.getElementById('detail-minutes').innerHTML = html;
+
+            // Show download button if DOCX is available
+            const dlBtn = document.getElementById('detail-download');
+            if (data.docx_url) {
+                dlBtn.style.display = '';
+                dlBtn.onclick = () => window.open(data.docx_url, '_blank');
+            } else {
+                dlBtn.style.display = 'none';
+            }
         }
     } catch (err) {
         document.getElementById('detail-minutes').innerHTML = '<p>Failed to load minutes.</p>';
@@ -1001,6 +1030,38 @@ function initEventListeners() {
 
     // Detail page — back button
     document.getElementById('detail-back').addEventListener('click', () => showPage('history'));
+
+    // Detail page — retry button (for failed jobs)
+    document.getElementById('detail-retry').addEventListener('click', async () => {
+        if (!currentDetailJobId) return;
+        const retryBtn = document.getElementById('detail-retry');
+        retryBtn.disabled = true;
+        try {
+            const res = await apiFetch(`${CONFIG.API_URL}/jobs/${currentDetailJobId}/retry`, {
+                method: 'POST',
+                headers: authHeaders(),
+            });
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.error || `HTTP ${res.status}`);
+            }
+            // Show success briefly via the error banner (reuse toast)
+            errorMessage.textContent = t('retrySuccess');
+            errorBanner.hidden = false;
+            errorBanner.querySelector('.toast__content').classList.remove('toast__content--error');
+            errorBanner.querySelector('.toast__content').classList.add('toast__content--success');
+            setTimeout(() => {
+                errorBanner.hidden = true;
+                errorBanner.querySelector('.toast__content').classList.remove('toast__content--success');
+                errorBanner.querySelector('.toast__content').classList.add('toast__content--error');
+            }, 4000);
+            showPage('history');
+        } catch (err) {
+            showError(err.message);
+        } finally {
+            retryBtn.disabled = false;
+        }
+    });
 
     // Detail page — refine submit
     document.getElementById('refine-submit').addEventListener('click', async () => {

@@ -496,7 +496,7 @@ body {
     box-shadow: var(--shadow-md);
     padding: var(--space-8) var(--space-8);
     width: 100%;
-    max-width: 560px;
+    max-width: 800px;
     position: relative;
     overflow: hidden;
 }
@@ -1232,7 +1232,7 @@ textarea:focus {
    ========================================================================== */
 .history-list {
     width: 100%;
-    max-width: 700px;
+    max-width: 800px;
 }
 
 .history-item {
@@ -1318,7 +1318,7 @@ textarea:focus {
     box-shadow: var(--shadow-md);
     padding: var(--space-8);
     width: 100%;
-    max-width: 480px;
+    max-width: 800px;
 }
 
 .settings-value {
@@ -1468,6 +1468,78 @@ textarea:focus {
 }
 
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* ==========================================================================
+   Detail Error Area (failed jobs)
+   ========================================================================== */
+.detail-error-area {
+    background: var(--color-error-bg);
+    border: 1px solid rgba(192,57,43,0.2);
+    border-radius: var(--radius-md);
+    padding: var(--space-4) var(--space-5);
+    margin-bottom: var(--space-6);
+}
+
+[data-theme="dark"] .detail-error-area {
+    background: rgba(192,57,43,0.15);
+    border-color: rgba(192,57,43,0.3);
+}
+
+.detail-error-area[hidden] { display: none; }
+
+.detail-error-message {
+    color: var(--color-error);
+    font-size: 0.9rem;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+/* ==========================================================================
+   Admin Card
+   ========================================================================== */
+.admin-card {
+    background: var(--surface-card);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-md);
+    padding: var(--space-8);
+    width: 100%;
+    max-width: 900px;
+}
+
+.admin-card input[type="email"],
+.admin-card input[type="password"] {
+    width: 100%;
+    padding: var(--space-3) var(--space-4);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-md);
+    background: var(--surface-raised);
+    color: var(--text-primary);
+    font-size: 0.95rem;
+    font-family: var(--font-body);
+    transition: border-color var(--t-fast), box-shadow var(--t-fast);
+}
+
+.admin-card input[type="email"]:focus,
+.admin-card input[type="password"]:focus {
+    outline: none;
+    border-color: var(--color-primary-500);
+    box-shadow: var(--shadow-focus);
+}
+
+/* ==========================================================================
+   Success Toast
+   ========================================================================== */
+.toast__content--success {
+    background: rgba(45,138,78,0.1);
+    color: var(--color-success);
+    border: 1px solid rgba(45,138,78,0.2);
+}
+
+[data-theme="dark"] .toast__content--success {
+    background: rgba(45,138,78,0.15);
+    border-color: rgba(45,138,78,0.3);
+}
 
 /* ==========================================================================
    Responsive
