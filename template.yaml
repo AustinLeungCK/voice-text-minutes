@@ -757,7 +757,7 @@ Resources:
   BatchInstanceRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: prod-voice-meeting-minutes-batch-instance-role
+      RoleName: prod-voice-meeting-minutes-batch-instance-role-seoul
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -781,14 +781,14 @@ Resources:
   BatchInstanceProfile:
     Type: AWS::IAM::InstanceProfile
     Properties:
-      InstanceProfileName: prod-voice-meeting-minutes-batch-instance-profile
+      InstanceProfileName: prod-voice-meeting-minutes-batch-instance-profile-seoul
       Roles:
         - !Ref BatchInstanceRole
 
   BatchSpotFleetRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: prod-voice-meeting-minutes-spot-fleet-role
+      RoleName: prod-voice-meeting-minutes-spot-fleet-role-seoul
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -811,7 +811,7 @@ Resources:
   BatchJobRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: prod-voice-meeting-minutes-batch-job-role
+      RoleName: prod-voice-meeting-minutes-batch-job-role-seoul
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -962,7 +962,7 @@ Resources:
   CodeBuildServiceRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: prod-voice-meeting-minutes-codebuild-role
+      RoleName: prod-voice-meeting-minutes-codebuild-role-seoul
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -1127,7 +1127,7 @@ Resources:
   ImageBuilderRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: prod-voice-meeting-minutes-imagebuilder-role
+      RoleName: prod-voice-meeting-minutes-imagebuilder-role-seoul
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -1160,7 +1160,7 @@ Resources:
   ImageBuilderInstanceProfile:
     Type: AWS::IAM::InstanceProfile
     Properties:
-      InstanceProfileName: prod-voice-meeting-minutes-imagebuilder-profile
+      InstanceProfileName: prod-voice-meeting-minutes-imagebuilder-profile-seoul
       Roles:
         - !Ref ImageBuilderRole
 
@@ -1171,7 +1171,7 @@ Resources:
       Platform: Linux
       Version: "1.0.9"
       Description: Install Python, ML packages (Whisper, pyannote, GOT-OCR), pre-download models
-      Uri: !Sub "s3://prod-voice-meeting-minutes-data-${AWS::AccountId}/imagebuilder/component.json"
+      Uri: "s3://aws-sam-cli-managed-default-samclisourcebucket-7m8o1cfjd8nb/imagebuilder/component.json"
       Tags:
         Project: voice-meeting-minutes
         ManagedBy: AWS SAM
@@ -1290,7 +1290,7 @@ Resources:
     Type: AWS::CloudFront::OriginAccessControl
     Properties:
       OriginAccessControlConfig:
-        Name: prod-voice-meeting-minutes-oac
+        Name: prod-voice-meeting-minutes-oac-seoul
         OriginAccessControlOriginType: s3
         SigningBehavior: always
         SigningProtocol: sigv4
@@ -1299,7 +1299,7 @@ Resources:
     Type: AWS::CloudFront::ResponseHeadersPolicy
     Properties:
       ResponseHeadersPolicyConfig:
-        Name: prod-voice-meeting-minutes-security-headers
+        Name: prod-voice-meeting-minutes-security-headers-seoul
         Comment: Security headers for Precis frontend
         SecurityHeadersConfig:
           StrictTransportSecurity:
@@ -1329,12 +1329,13 @@ Resources:
         DefaultRootObject: index.html
         HttpVersion: http2and3
         PriceClass: PriceClass_200
-        Aliases:
-          - minutes.msphk.info
-        ViewerCertificate:
-          AcmCertificateArn: arn:aws:acm:us-east-1:036293420772:certificate/e44e6653-680e-40ad-a819-632ae9df8b9e
-          SslSupportMethod: sni-only
-          MinimumProtocolVersion: TLSv1.2_2021
+        # Aliases + custom cert added after HK stack decommission
+        # Aliases:
+        #   - minutes.msphk.info
+        # ViewerCertificate:
+        #   AcmCertificateArn: arn:aws:acm:us-east-1:036293420772:certificate/e44e6653-680e-40ad-a819-632ae9df8b9e
+        #   SslSupportMethod: sni-only
+        #   MinimumProtocolVersion: TLSv1.2_2021
         Origins:
           - Id: S3Origin
             DomainName: !GetAtt FrontendBucket.RegionalDomainName
