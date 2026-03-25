@@ -1,7 +1,7 @@
+import io
 import json
 import os
 import re
-import tempfile
 from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -190,18 +190,15 @@ def _md_to_docx(md_content, file_name):
 
         # Regular paragraph
         else:
-            text = _clean_md_inline(stripped)
             p = doc.add_paragraph()
             _add_formatted_runs(p, stripped)
 
         i += 1
 
-    # Save to bytes
-    with tempfile.NamedTemporaryFile(suffix=".docx", delete=False) as tmp:
-        doc.save(tmp.name)
-        tmp.seek(0)
-        with open(tmp.name, "rb") as f:
-            return f.read()
+    # Save to bytes in memory
+    buf = io.BytesIO()
+    doc.save(buf)
+    return buf.getvalue()
 
 
 def _clean_md_inline(text):

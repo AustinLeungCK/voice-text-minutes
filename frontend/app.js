@@ -62,17 +62,18 @@ async function signIn(email, password) {
 
 async function completeNewPassword(newPassword) {
     if (!pendingChallenge) throw { message: 'No pending challenge' };
+    const email = pendingChallenge.email;
     const data = await cognitoCall('RespondToAuthChallenge', {
         ChallengeName: 'NEW_PASSWORD_REQUIRED',
         ClientId: CONFIG.COGNITO_CLIENT_ID,
         Session: pendingChallenge.session,
         ChallengeResponses: {
-            USERNAME: pendingChallenge.email,
+            USERNAME: email,
             NEW_PASSWORD: newPassword,
         },
     });
     pendingChallenge = null;
-    return _completeAuth(data, pendingChallenge?.email);
+    return _completeAuth(data, email);
 }
 
 async function forgotPassword(email) {
@@ -234,6 +235,7 @@ const I18N = {
         historyStatus_uploaded: '已上傳',
         historyStatus_processing: '處理中',
         historyStatus_completed: '完成',
+        historyStatus_refined: '已調整',
         historyStatus_failed: '失敗',
         authEmail: 'Email',
         authPassword: '密碼',
@@ -330,6 +332,7 @@ const I18N = {
         historyStatus_uploaded: 'Uploaded',
         historyStatus_processing: 'Processing',
         historyStatus_completed: 'Completed',
+        historyStatus_refined: 'Refined',
         historyStatus_failed: 'Failed',
         authEmail: 'Email',
         authPassword: 'Password',
@@ -660,9 +663,16 @@ async function loadHistory() {
         jobs.forEach(job => {
             const statusKey = `historyStatus_${job.status}`;
             const statusText = t(statusKey);
-            const statusClass = job.status === 'completed' ? 'success'
-                : job.status === 'failed' ? 'error'
-                : job.status === 'processing' ? 'processing' : 'default';
+            let statusClass;
+            if (job.status === 'completed' || job.status === 'refined') {
+                statusClass = 'success';
+            } else if (job.status === 'failed') {
+                statusClass = 'error';
+            } else if (job.status === 'processing') {
+                statusClass = 'processing';
+            } else {
+                statusClass = 'default';
+            }
             const date = job.created_at ? new Date(job.created_at).toISOString().slice(0, 10) : '';
             const fmt = job.requirements?.output_format || '';
             const lang = job.requirements?.output_language || '';
@@ -693,7 +703,7 @@ async function loadHistory() {
             badge.className = `history-item__badge history-item__badge--${statusClass}`;
             badge.textContent = statusText;
 
-            if (job.status === 'completed') {
+            if (job.status === 'completed' || job.status === 'refined') {
                 item.style.cursor = 'pointer';
                 item.addEventListener('click', () => showJobDetail(job.job_id, job.file_name));
             }
@@ -750,11 +760,7 @@ function simpleMarkdownToHtml(md) {
         .replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>')
         .replace(/^---$/gm, '<hr>')
         .replace(/\n\n/g, '</p><p>')
-        .replace(/\n/g, '<br>')
-        .replace(/^(.+)$/gm, function(match) {
-            if (match.startsWith('<')) return match;
-            return match;
-        });
+        .replace(/\n/g, '<br>');
 }
 
 // --- Utility ---

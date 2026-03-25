@@ -4,11 +4,14 @@ import os
 import boto3
 
 dynamodb = boto3.resource("dynamodb")
+s3_client = boto3.client("s3")
+
 JOBS_TABLE = os.environ["JOBS_TABLE"]
+DATA_BUCKET = os.environ["DATA_BUCKET"]
 
 
 def lambda_handler(event, context):
-    job_id = event.get("pathParameters", {}).get("job_id")
+    job_id = (event.get("pathParameters") or {}).get("job_id")
     if not job_id:
         return _response(400, {"error": "job_id is required"})
 
@@ -29,16 +32,26 @@ def lambda_handler(event, context):
     if not caller_email or caller_email != item.get("email"):
         return _response(404, {"error": "Job not found"})
 
-    return _response(
-        200,
-        {
-            "job_id": item["job_id"],
-            "status": item["status"],
-            "created_at": item.get("created_at"),
-            "completed_at": item.get("completed_at"),
-            "error_message": item.get("error_message"),
-        },
-    )
+    response_body = {
+        "job_id": item["job_id"],
+        "status": item["status"],
+        "created_at": item.get("created_at"),
+        "completed_at": item.get("completed_at"),
+        "error_message": item.get("error_message"),
+    }
+
+    # Include meeting minutes content for completed/refined jobs
+    if item.get("status") in ("completed", "refined"):
+        try:
+            resp = s3_client.get_object(
+                Bucket=DATA_BUCKET,
+                Key=f"jobs/{job_id}/meeting_minutes.md",
+            )
+            response_body["minutes"] = resp["Body"].read().decode("utf-8")
+        except s3_client.exceptions.NoSuchKey:
+            response_body["minutes"] = ""
+
+    return _response(200, response_body)
 
 
 def _response(status_code, body):
@@ -48,5 +61,5 @@ def _response(status_code, body):
             "Content-Type": "application/json",
             "Access-Control-Allow-Origin": "https://minutes.msphk.info",
         },
-        "body": json.dumps(body),
+        "body": json.dumps(body, ensure_ascii=False),
     }

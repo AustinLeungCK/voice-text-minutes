@@ -5,7 +5,7 @@ import boto3
 
 s3_client = boto3.client("s3")
 dynamodb = boto3.resource("dynamodb")
-bedrock = boto3.client("bedrock-runtime", region_name=os.environ.get("BEDROCK_REGION", "ap-southeast-1"))
+bedrock = boto3.client("bedrock-runtime", region_name=os.environ.get("BEDROCK_REGION", "ap-northeast-1"))
 
 JOBS_TABLE = os.environ["JOBS_TABLE"]
 

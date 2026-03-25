@@ -25,3 +25,6 @@ Scripts/
 share/
 pyvenv.cfg
 tests/
+
+# Lambda test output
+*_out.json

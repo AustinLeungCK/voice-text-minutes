@@ -2,7 +2,7 @@ AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 Description: >
   prod-voice-meeting-minutes — Meeting recording to meeting minutes pipeline.
-  HK (ap-east-1) for processing, cross-region Bedrock (ap-southeast-1) for summarization,
+  HK (ap-east-1) for processing, cross-region Bedrock (ap-northeast-1) for summarization,
   cross-region SES (ap-southeast-1) for email.
 
 # =============================================================================
@@ -41,7 +41,6 @@ Globals:
         SES_REGION: ap-southeast-1
         BEDROCK_REGION: ap-northeast-1
         SES_FROM_EMAIL: !Ref SESFromEmail
-        SES_IDENTITY_ARN: arn:aws:ses:ap-southeast-1:507088713162:identity/msphk.info
     Tags:
       Project: voice-meeting-minutes
       ManagedBy: AWS SAM
@@ -429,7 +428,6 @@ Resources:
               Condition:
                 StringEquals:
                   "aws:RequestedRegion":
-                    - "ap-southeast-1"
                     - "ap-northeast-1"
 
   NotifyFunction:
@@ -439,9 +437,6 @@ Resources:
       Handler: handler.lambda_handler
       CodeUri: lambdas/notify/
       Timeout: 60
-      Environment:
-        Variables:
-          SES_ROLE_ARN: "arn:aws:iam::507088713162:role/precis-ses-send-role"
       Policies:
         - S3ReadPolicy:
             BucketName: !Ref DataBucket
@@ -453,16 +448,10 @@ Resources:
               Action:
                 - ses:SendEmail
                 - ses:SendRawEmail
-                - ses:SendBulkEmail
               Resource: "*"
               Condition:
                 StringEquals:
                   "aws:RequestedRegion": "ap-southeast-1"
-        - Version: "2012-10-17"
-          Statement:
-            - Effect: Allow
-              Action: sts:AssumeRole
-              Resource: "arn:aws:iam::507088713162:role/precis-ses-send-role"
 
   ListJobsFunction:
     Type: AWS::Serverless::Function
@@ -492,6 +481,8 @@ Resources:
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Ref JobsTable
+        - S3ReadPolicy:
+            BucketName: !Ref DataBucket
       Events:
         GetStatus:
           Type: Api
