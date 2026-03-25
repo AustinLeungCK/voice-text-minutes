@@ -248,7 +248,7 @@ Resources:
       CorsConfiguration:
         CorsRules:
           - AllowedOrigins:
-              - "https://minutes.msphk.info"
+              - "*"  # TODO: lock to https://minutes.msphk.info after domain switch
             AllowedMethods:
               - PUT
               - GET
@@ -324,7 +324,7 @@ Resources:
       Name: prod-voice-meeting-minutes-api
       StageName: prod
       Cors:
-        AllowOrigin: "'https://minutes.msphk.info'"
+        AllowOrigin: "'*'"  # TODO: lock to https://minutes.msphk.info after domain switch
         AllowMethods: "'GET,POST,DELETE,OPTIONS'"
         AllowHeaders: "'Content-Type,X-Api-Key,Authorization'"
       Auth:

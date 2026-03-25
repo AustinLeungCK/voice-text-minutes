@@ -233,18 +233,25 @@ def run_diarize(wav_path, num_speakers=None):
     return {"segments": segments}
 
 
+MAX_OCR_FRAMES = 30  # Cap slide OCR to avoid 15+ min processing
+
+
 def run_ocr(mp4_path):
-    """Extract frames and run GOT-OCR2.0 for participant names and slides."""
+    """Extract frames and run GOT-OCR2.0 for participant names and slides.
+
+    Optimisations vs naive approach:
+    - Higher scene threshold (0.4) to reduce false positives
+    - Perceptual dedup via average hash — skip visually identical frames
+    - Hard cap at MAX_OCR_FRAMES to bound worst-case runtime
+    """
     frames_dir = WORK_DIR / "frames"
     frames_dir.mkdir(exist_ok=True)
 
-    # Extract frames using scene detection — only when the screen changes significantly
-    # (e.g., slide transitions, window switches). Much faster than fixed fps for typical
-    # meetings: 10-20 scene changes vs 120 fixed-interval frames for a 1-hour meeting.
+    # Extract frames using scene detection (threshold 0.4 — stricter than default)
     subprocess.run(
         [
             "ffmpeg", "-i", str(mp4_path),
-            "-vf", "select=gt(scene\\,0.3),showinfo", "-vsync", "vfr", "-q:v", "2",
+            "-vf", "select=gt(scene\\,0.4),showinfo", "-vsync", "vfr", "-q:v", "2",
             str(frames_dir / "slide_%04d.jpg"), "-y",
         ],
         check=True,
@@ -293,13 +300,22 @@ def run_ocr(mp4_path):
             result["participant_names"] = names
             print(f"OCR found {len(names)} participant names")
 
-        # OCR slides (scene-detected frames)
+        # Dedup slides by average hash — skip visually identical frames
         slide_files = sorted(frames_dir.glob("slide_*.jpg"))
-        for i, slide_path in enumerate(slide_files):
+        unique_slides = _dedup_frames(slide_files)
+        if len(unique_slides) < len(slide_files):
+            print(f"Dedup: {len(slide_files)} → {len(unique_slides)} unique frames")
+
+        # Cap to avoid unbounded OCR time
+        if len(unique_slides) > MAX_OCR_FRAMES:
+            print(f"Capping OCR from {len(unique_slides)} to {MAX_OCR_FRAMES} frames")
+            unique_slides = unique_slides[:MAX_OCR_FRAMES]
+
+        for i, slide_path in enumerate(unique_slides):
             if _shutting_down.is_set():
-                print(f"Interrupted during OCR at slide {i}/{len(slide_files)}, saving partial results")
+                print(f"Interrupted during OCR at slide {i}/{len(unique_slides)}, saving partial results")
                 break
-            print(f"OCR slide {i+1}/{len(slide_files)}...")
+            print(f"OCR slide {i+1}/{len(unique_slides)}...")
             slide_text = _ocr_image(slide_path)
             if slide_text.strip():
                 result["slide_contents"].append({
@@ -312,9 +328,36 @@ def run_ocr(mp4_path):
 
     except Exception as e:
         print(f"OCR warning: {e}", file=sys.stderr)
-        # Return empty OCR results — pipeline continues without OCR
 
     return result
+
+
+def _dedup_frames(paths, hash_size=16, threshold=12):
+    """Remove near-duplicate frames using average hash (PIL only, no extra deps).
+
+    Uses 16x16 hash (256 bits) with hamming threshold 12 (~5%).
+    At this resolution, Excel scroll/cell-select changes blur away while
+    genuine slide transitions (different layout/colours) remain distinct.
+    """
+    from PIL import Image
+
+    def _avg_hash(img_path):
+        img = Image.open(str(img_path)).convert("L").resize((hash_size, hash_size))
+        pixels = list(img.getdata())
+        avg = sum(pixels) / len(pixels)
+        return sum(1 << i for i, p in enumerate(pixels) if p > avg)
+
+    def _hamming(a, b):
+        return bin(a ^ b).count("1")
+
+    seen_hashes = []
+    unique = []
+    for p in paths:
+        h = _avg_hash(p)
+        if all(_hamming(h, s) > threshold for s in seen_hashes):
+            seen_hashes.append(h)
+            unique.append(p)
+    return unique
 
 
 def _clear_gpu():
