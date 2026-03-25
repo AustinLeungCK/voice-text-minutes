@@ -19,6 +19,16 @@ def lambda_handler(event, context):
     if not item:
         return _response(404, {"error": "Job not found"})
 
+    # IDOR protection: verify the Cognito caller owns this job
+    claims = (
+        (event.get("requestContext") or {})
+        .get("authorizer", {})
+        .get("claims", {})
+    )
+    caller_email = claims.get("email")
+    if not caller_email or caller_email != item.get("email"):
+        return _response(404, {"error": "Job not found"})
+
     return _response(
         200,
         {
@@ -36,7 +46,7 @@ def _response(status_code, body):
         "statusCode": status_code,
         "headers": {
             "Content-Type": "application/json",
-            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Origin": "https://minutes.msphk.info",
         },
         "body": json.dumps(body),
     }

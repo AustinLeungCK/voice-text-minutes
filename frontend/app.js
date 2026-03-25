@@ -3,7 +3,7 @@
 // ==========================================================================
 
 // --- Config（從 config.json 載入，gitignored） ---
-let CONFIG = { API_URL: '', API_KEY: '', COGNITO_CLIENT_ID: '', COGNITO_REGION: '' };
+let CONFIG = { API_URL: '', COGNITO_CLIENT_ID: '', COGNITO_REGION: '' };
 
 async function loadConfig() {
     try {
@@ -640,7 +640,8 @@ async function loadHistory() {
         }
 
         emptyEl.hidden = true;
-        listEl.innerHTML = jobs.map(job => {
+        listEl.innerHTML = '';
+        jobs.forEach(job => {
             const statusKey = `historyStatus_${job.status}`;
             const statusText = t(statusKey);
             const statusClass = job.status === 'completed' ? 'success'
@@ -652,15 +653,35 @@ async function loadHistory() {
 
             const title = job.file_name || `${job.job_id.substring(0, 8)}...`;
 
-            return `<div class="history-item">
-                <div class="history-item__status history-item__status--${statusClass}"></div>
-                <div class="history-item__body">
-                    <div class="history-item__title">${title}</div>
-                    <div class="history-item__meta">${date} · ${lang} · ${fmt}</div>
-                </div>
-                <span class="history-item__badge history-item__badge--${statusClass}">${statusText}</span>
-            </div>`;
-        }).join('');
+            const item = document.createElement('div');
+            item.className = 'history-item';
+
+            const statusDot = document.createElement('div');
+            statusDot.className = `history-item__status history-item__status--${statusClass}`;
+
+            const body = document.createElement('div');
+            body.className = 'history-item__body';
+
+            const titleEl = document.createElement('div');
+            titleEl.className = 'history-item__title';
+            titleEl.textContent = title;
+
+            const metaEl = document.createElement('div');
+            metaEl.className = 'history-item__meta';
+            metaEl.textContent = `${date} \u00b7 ${lang} \u00b7 ${fmt}`;
+
+            body.appendChild(titleEl);
+            body.appendChild(metaEl);
+
+            const badge = document.createElement('span');
+            badge.className = `history-item__badge history-item__badge--${statusClass}`;
+            badge.textContent = statusText;
+
+            item.appendChild(statusDot);
+            item.appendChild(body);
+            item.appendChild(badge);
+            listEl.appendChild(item);
+        });
     } catch {
         listEl.innerHTML = '';
         emptyEl.hidden = false;

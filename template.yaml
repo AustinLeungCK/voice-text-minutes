@@ -255,7 +255,7 @@ Resources:
       CorsConfiguration:
         CorsRules:
           - AllowedOrigins:
-              - "*"
+              - "https://minutes.msphk.info"
             AllowedMethods:
               - PUT
               - GET
@@ -331,7 +331,7 @@ Resources:
       Name: prod-voice-meeting-minutes-api
       StageName: prod
       Cors:
-        AllowOrigin: "'*'"
+        AllowOrigin: "'https://minutes.msphk.info'"
         AllowMethods: "'GET,POST,OPTIONS'"
         AllowHeaders: "'Content-Type,X-Api-Key,Authorization'"
       Auth:
@@ -446,6 +446,9 @@ Resources:
       Handler: handler.lambda_handler
       CodeUri: lambdas/notify/
       Timeout: 60
+      Environment:
+        Variables:
+          SES_ROLE_ARN: "arn:aws:iam::507088713162:role/precis-ses-send-role"
       Policies:
         - S3ReadPolicy:
             BucketName: !Ref DataBucket
@@ -462,6 +465,11 @@ Resources:
               Condition:
                 StringEquals:
                   "aws:RequestedRegion": "ap-southeast-1"
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action: sts:AssumeRole
+              Resource: "arn:aws:iam::507088713162:role/precis-ses-send-role"
 
   ListJobsFunction:
     Type: AWS::Serverless::Function
@@ -1171,6 +1179,31 @@ Resources:
         SigningBehavior: always
         SigningProtocol: sigv4
 
+  CloudFrontSecurityHeaders:
+    Type: AWS::CloudFront::ResponseHeadersPolicy
+    Properties:
+      ResponseHeadersPolicyConfig:
+        Name: prod-voice-meeting-minutes-security-headers
+        Comment: Security headers for Precis frontend
+        SecurityHeadersConfig:
+          StrictTransportSecurity:
+            AccessControlMaxAgeSec: 31536000
+            IncludeSubdomains: true
+            Preload: true
+            Override: true
+          ContentTypeOptions:
+            Override: true
+          FrameOptions:
+            FrameOption: DENY
+            Override: true
+          ReferrerPolicy:
+            ReferrerPolicy: strict-origin-when-cross-origin
+            Override: true
+          ContentSecurityPolicy:
+            ContentSecurityPolicy: "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self' https://yelhrrcfd7.execute-api.ap-east-1.amazonaws.com https://cognito-idp.ap-east-1.amazonaws.com https://s3.ap-east-1.amazonaws.com; img-src 'self' data:; frame-ancestors 'none'; base-uri 'self'; form-action 'self';"
+            Override: true
+    # Note: AWS::CloudFront::ResponseHeadersPolicy does not support Tags.
+
   CloudFrontDistribution:
     Type: AWS::CloudFront::Distribution
     Properties:
@@ -1190,6 +1223,7 @@ Resources:
           TargetOriginId: S3Origin
           ViewerProtocolPolicy: redirect-to-https
           CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6  # CachingOptimized
+          ResponseHeadersPolicyId: !Ref CloudFrontSecurityHeaders
           Compress: true
           AllowedMethods:
             - GET

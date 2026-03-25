@@ -66,7 +66,7 @@
               "echo '=== Installing PyTorch ==='",
               "/opt/processor/venv/bin/pip install --no-cache-dir torch==2.4.0 torchaudio==2.4.0 --index-url https://download.pytorch.org/whl/cu121",
               "echo '=== Installing ML packages ==='",
-              "/opt/processor/venv/bin/pip install --no-cache-dir faster-whisper==1.1.0 pyannote.audio==3.3.2 soundfile==0.12.1 transformers==4.49.0 tiktoken boto3 matplotlib",
+              "/opt/processor/venv/bin/pip install --no-cache-dir faster-whisper==1.1.0 pyannote.audio==3.3.2 soundfile==0.12.1 transformers==4.49.0 tiktoken boto3 matplotlib accelerate",
               "echo '=== Installing GOT-OCR2 ==='",
               "/opt/processor/venv/bin/pip install --no-cache-dir got-ocr2 || echo 'WARN: got-ocr2 install failed, will use transformers fallback'",
               "echo '=== Verifying venv ==='",

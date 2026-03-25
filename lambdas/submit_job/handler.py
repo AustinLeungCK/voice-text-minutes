@@ -1,9 +1,14 @@
 import json
 import os
+import re
 import uuid
 from datetime import datetime, timezone
 
 import boto3
+
+ALLOWED_OUTPUT_LANGUAGES = {"繁體中文", "简体中文", "English"}
+ALLOWED_SUMMARY_LENGTHS = {"short", "medium", "detailed"}
+ALLOWED_OUTPUT_FORMATS = {"minutes", "action_items", "both"}
 
 dynamodb = boto3.resource("dynamodb")
 
@@ -30,12 +35,30 @@ def lambda_handler(event, context):
 
     job_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
-    file_name = body.get("file_name", "recording.mp4")
+
+    # Sanitize file_name: strip HTML-dangerous chars, limit length
+    raw_name = body.get("file_name", "recording.mp4")
+    file_name = re.sub(r"[<>&\"']", "", raw_name)[:255]
+    if not file_name:
+        file_name = "recording.mp4"
+
+    # Validate enum fields — fall back to defaults on invalid values
+    output_language = body.get("output_language", "繁體中文")
+    if output_language not in ALLOWED_OUTPUT_LANGUAGES:
+        output_language = "繁體中文"
+
+    summary_length = body.get("summary_length", "medium")
+    if summary_length not in ALLOWED_SUMMARY_LENGTHS:
+        summary_length = "medium"
+
+    output_format = body.get("output_format", "minutes")
+    if output_format not in ALLOWED_OUTPUT_FORMATS:
+        output_format = "minutes"
 
     requirements = {
-        "output_language": body.get("output_language", "繁體中文"),
-        "summary_length": body.get("summary_length", "medium"),
-        "output_format": body.get("output_format", "minutes"),
+        "output_language": output_language,
+        "summary_length": summary_length,
+        "output_format": output_format,
         "custom_instructions": body.get("custom_instructions", ""),
     }
 
@@ -78,7 +101,7 @@ def _response(status_code, body):
         "statusCode": status_code,
         "headers": {
             "Content-Type": "application/json",
-            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Origin": "https://minutes.msphk.info",
         },
         "body": json.dumps(body),
     }
