@@ -41,18 +41,74 @@ async function cognitoCall(action, payload) {
     return data;
 }
 
+// Pending challenge state for NEW_PASSWORD_REQUIRED
+let pendingChallenge = null;
+
 async function signIn(email, password) {
     const data = await cognitoCall('InitiateAuth', {
         AuthFlow: 'USER_PASSWORD_AUTH',
         ClientId: CONFIG.COGNITO_CLIENT_ID,
         AuthParameters: { USERNAME: email, PASSWORD: password },
     });
+
+    // Handle NEW_PASSWORD_REQUIRED challenge (first login)
+    if (data.ChallengeName === 'NEW_PASSWORD_REQUIRED') {
+        pendingChallenge = { session: data.Session, email };
+        return { challenge: 'NEW_PASSWORD_REQUIRED' };
+    }
+
+    return _completeAuth(data, email);
+}
+
+async function completeNewPassword(newPassword) {
+    if (!pendingChallenge) throw { message: 'No pending challenge' };
+    const data = await cognitoCall('RespondToAuthChallenge', {
+        ChallengeName: 'NEW_PASSWORD_REQUIRED',
+        ClientId: CONFIG.COGNITO_CLIENT_ID,
+        Session: pendingChallenge.session,
+        ChallengeResponses: {
+            USERNAME: pendingChallenge.email,
+            NEW_PASSWORD: newPassword,
+        },
+    });
+    pendingChallenge = null;
+    return _completeAuth(data, pendingChallenge?.email);
+}
+
+async function forgotPassword(email) {
+    await cognitoCall('ForgotPassword', {
+        ClientId: CONFIG.COGNITO_CLIENT_ID,
+        Username: email,
+    });
+}
+
+async function confirmForgotPassword(email, code, newPassword) {
+    await cognitoCall('ConfirmForgotPassword', {
+        ClientId: CONFIG.COGNITO_CLIENT_ID,
+        Username: email,
+        ConfirmationCode: code,
+        Password: newPassword,
+    });
+}
+
+async function changePassword(oldPassword, newPassword) {
+    if (!currentUser?.accessToken) throw { message: 'Not signed in' };
+    await cognitoCall('ChangePassword', {
+        AccessToken: currentUser.accessToken,
+        PreviousPassword: oldPassword,
+        ProposedPassword: newPassword,
+    });
+}
+
+function _completeAuth(data, email) {
     const idToken = data.AuthenticationResult.IdToken;
+    const accessToken = data.AuthenticationResult.AccessToken;
     const payload = JSON.parse(atob(idToken.split('.')[1]));
     const user = {
         email: payload.email || email,
         name: payload.name || payload.email || email,
         token: idToken,
+        accessToken: accessToken,
         expires_at: Date.now() + (data.AuthenticationResult.ExpiresIn || 3600) * 1000,
     };
     sessionStorage.setItem('precis-auth', JSON.stringify(user));
@@ -110,6 +166,13 @@ function showApp() {
 function showLogin() {
     document.getElementById('login-screen').hidden = false;
     document.getElementById('app-layout').hidden = true;
+    _showAuthForm('auth-login');
+}
+
+function _showAuthForm(formId) {
+    ['auth-login', 'auth-new-password', 'auth-forgot', 'auth-reset'].forEach(id => {
+        document.getElementById(id).hidden = (id !== formId);
+    });
 }
 
 // --- i18n 字串表 ---
@@ -185,6 +248,22 @@ const I18N = {
         passwordHint: '最少 8 個字，需要大小寫同數字',
         confirmInfo: '驗證碼已發送到你嘅 email。',
         contactAdmin: '如需帳號，請聯絡管理員。',
+        forgotPassword: '忘記密碼？',
+        newPasswordInfo: '首次登入，請設定新密碼。',
+        newPassword: '新密碼',
+        confirmPassword: '確認密碼',
+        btnSetPassword: '設定密碼',
+        forgotInfo: '輸入你嘅 email，我哋會發送重設密碼嘅驗證碼。',
+        btnSendCode: '發送驗證碼',
+        backToLogin: '返回登入',
+        resetInfo: '驗證碼已發送到你嘅 email。',
+        btnResetPassword: '重設密碼',
+        errPasswordMismatch: '兩次輸入嘅密碼唔一樣',
+        resetSuccess: '密碼已重設，請用新密碼登入。',
+        changePassword: '更改密碼',
+        currentPassword: '現有密碼',
+        btnChangePassword: '更改密碼',
+        passwordChanged: '密碼已更改成功。',
     },
     en: {
         logoSub: 'Precis',
@@ -257,6 +336,22 @@ const I18N = {
         passwordHint: 'Min 8 characters, uppercase, lowercase and numbers',
         confirmInfo: 'A verification code has been sent to your email.',
         contactAdmin: 'Contact your administrator for an account.',
+        forgotPassword: 'Forgot password?',
+        newPasswordInfo: 'First login — please set a new password.',
+        newPassword: 'New Password',
+        confirmPassword: 'Confirm Password',
+        btnSetPassword: 'Set Password',
+        forgotInfo: "Enter your email and we'll send you a verification code.",
+        btnSendCode: 'Send Code',
+        backToLogin: 'Back to Sign In',
+        resetInfo: 'A verification code has been sent to your email.',
+        btnResetPassword: 'Reset Password',
+        errPasswordMismatch: 'Passwords do not match',
+        resetSuccess: 'Password reset. Please sign in with your new password.',
+        changePassword: 'Change Password',
+        currentPassword: 'Current Password',
+        btnChangePassword: 'Change Password',
+        passwordChanged: 'Password changed successfully.',
     },
 };
 
@@ -627,8 +722,112 @@ function initEventListeners() {
         const email = document.getElementById('login-email').value.trim();
         const password = document.getElementById('login-password').value;
         try {
-            currentUser = await signIn(email, password);
+            const result = await signIn(email, password);
+            if (result.challenge === 'NEW_PASSWORD_REQUIRED') {
+                _showAuthForm('auth-new-password');
+                return;
+            }
+            currentUser = result;
             showApp();
+        } catch (err) {
+            errEl.textContent = err.message;
+            errEl.hidden = false;
+        }
+    });
+
+    // New password form (first login)
+    document.getElementById('auth-new-password').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const errEl = document.getElementById('new-password-error');
+        errEl.hidden = true;
+        const pw = document.getElementById('new-password').value;
+        const pw2 = document.getElementById('new-password-confirm').value;
+        if (pw !== pw2) {
+            errEl.textContent = t('errPasswordMismatch');
+            errEl.hidden = false;
+            return;
+        }
+        try {
+            currentUser = await completeNewPassword(pw);
+            showApp();
+        } catch (err) {
+            errEl.textContent = err.message;
+            errEl.hidden = false;
+        }
+    });
+
+    // Forgot password link
+    document.getElementById('forgot-password-link').addEventListener('click', (e) => {
+        e.preventDefault();
+        document.getElementById('forgot-email').value = document.getElementById('login-email').value;
+        _showAuthForm('auth-forgot');
+    });
+
+    // Back to login link
+    document.getElementById('back-to-login').addEventListener('click', (e) => {
+        e.preventDefault();
+        _showAuthForm('auth-login');
+    });
+
+    // Forgot password form — send code
+    let forgotEmail = '';
+    document.getElementById('auth-forgot').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const errEl = document.getElementById('forgot-error');
+        errEl.hidden = true;
+        forgotEmail = document.getElementById('forgot-email').value.trim();
+        try {
+            await forgotPassword(forgotEmail);
+            _showAuthForm('auth-reset');
+        } catch (err) {
+            errEl.textContent = err.message;
+            errEl.hidden = false;
+        }
+    });
+
+    // Reset password form — enter code + new password
+    document.getElementById('auth-reset').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const errEl = document.getElementById('reset-error');
+        errEl.hidden = true;
+        const code = document.getElementById('reset-code').value.trim();
+        const pw = document.getElementById('reset-password').value;
+        try {
+            await confirmForgotPassword(forgotEmail, code, pw);
+            _showAuthForm('auth-login');
+            const loginErr = document.getElementById('login-error');
+            loginErr.textContent = t('resetSuccess');
+            loginErr.hidden = false;
+            loginErr.style.color = 'var(--color-success, #4caf50)';
+            setTimeout(() => { loginErr.style.color = ''; }, 5000);
+        } catch (err) {
+            errEl.textContent = err.message;
+            errEl.hidden = false;
+        }
+    });
+
+    // Change password form
+    document.getElementById('change-password-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const errEl = document.getElementById('change-password-error');
+        const successEl = document.getElementById('change-password-success');
+        errEl.hidden = true;
+        successEl.hidden = true;
+
+        const oldPw = document.getElementById('current-password').value;
+        const newPw = document.getElementById('settings-new-password').value;
+        const confirmPw = document.getElementById('settings-confirm-password').value;
+
+        if (newPw !== confirmPw) {
+            errEl.textContent = t('errPasswordMismatch');
+            errEl.hidden = false;
+            return;
+        }
+        try {
+            await changePassword(oldPw, newPw);
+            successEl.textContent = t('passwordChanged');
+            successEl.hidden = false;
+            document.getElementById('change-password-form').reset();
         } catch (err) {
             errEl.textContent = err.message;
             errEl.hidden = false;

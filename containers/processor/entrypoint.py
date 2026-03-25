@@ -236,13 +236,15 @@ def run_ocr(mp4_path):
     try:
         from transformers import AutoModel, AutoTokenizer
 
+        import torch
+
         tokenizer = AutoTokenizer.from_pretrained(
             "stepfun-ai/GOT-OCR-2.0-hf", trust_remote_code=True
         )
         model = AutoModel.from_pretrained(
             "stepfun-ai/GOT-OCR-2.0-hf", trust_remote_code=True,
-            device_map="cuda",
-        )
+            torch_dtype=torch.float16,
+        ).to("cuda")
 
         # OCR participant names from first frame
         names_img = frames_dir / "names.jpg"

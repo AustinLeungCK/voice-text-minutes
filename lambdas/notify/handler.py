@@ -1,7 +1,15 @@
 import json
 import os
+import re
+import tempfile
+from email.mime.application import MIMEApplication
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 
 import boto3
+from docx import Document
+from docx.shared import Pt, Inches, RGBColor
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 
 REGION = os.environ.get("AWS_REGION", "ap-east-1")
 s3_client = boto3.client(
@@ -25,7 +33,6 @@ def lambda_handler(event, context):
     status = event.get("status", "completed")
     error = event.get("error")
 
-    # 從 DynamoDB 攞 file_name，用喺 email subject/body
     table = dynamodb.Table(JOBS_TABLE)
     job_record = table.get_item(Key={"job_id": job_id}).get("Item", {})
     file_name = job_record.get("file_name", "recording")
@@ -35,7 +42,6 @@ def lambda_handler(event, context):
     else:
         _send_failure_email(job_id, email, error, file_name)
 
-    # Update DynamoDB
     table.update_item(
         Key={"job_id": job_id},
         UpdateExpression="SET #s = :status",
@@ -46,50 +52,222 @@ def lambda_handler(event, context):
     return {"status": "notified", "email": email}
 
 
+# ---------------------------------------------------------------------------
+# Success email with DOCX attachment
+# ---------------------------------------------------------------------------
 def _send_success_email(job_id, email, file_name):
-    # Read meeting minutes
     key = f"jobs/{job_id}/meeting_minutes.md"
     resp = s3_client.get_object(Bucket=DATA_BUCKET, Key=key)
-    minutes_content = resp["Body"].read().decode("utf-8")
+    md_content = resp["Body"].read().decode("utf-8")
 
-    # Generate presigned download URL (7 days)
-    download_url = s3_client.generate_presigned_url(
-        "get_object",
-        Params={"Bucket": DATA_BUCKET, "Key": key},
-        ExpiresIn=604800,
-    )
+    # Build DOCX
+    docx_bytes = _md_to_docx(md_content, file_name)
+
+    # Build display name from file_name (strip extension + timestamp)
+    display_name = re.sub(r'-\d{8}_\d{6}-.*$', '', file_name)
+    if not display_name:
+        display_name = file_name.rsplit(".", 1)[0]
+    docx_filename = f"{display_name} — 會議紀錄.docx"
+
+    # Build MIME email with attachment
+    msg = MIMEMultipart("mixed")
+    msg["Subject"] = f"你嘅會議紀錄已準備好 — {display_name}"
+    msg["From"] = SES_FROM_EMAIL
+    msg["To"] = email
+
+    # HTML body — short notification, no inline minutes
+    html_body = f"""
+    <html>
+    <body style="font-family: -apple-system, 'Segoe UI', sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+        <h2 style="color: #3a7f82;">會議紀錄已準備好</h2>
+        <p style="font-size: 16px; color: #333;">
+            <strong>{display_name}</strong> 嘅會議紀錄已經處理完成。
+        </p>
+        <p style="color: #666;">
+            請查收附件中嘅 Word 文件（.docx）。
+        </p>
+        <hr style="border: none; border-top: 1px solid #e0e0e0; margin: 24px 0;">
+        <p style="font-size: 12px; color: #999;">
+            此郵件由 Precis（精記）自動發送。
+        </p>
+    </body>
+    </html>
+    """
+    text_body = f"{display_name} 嘅會議紀錄已經處理完成。請查收附件中嘅 Word 文件。"
+
+    # Attach HTML + text body
+    body_part = MIMEMultipart("alternative")
+    body_part.attach(MIMEText(text_body, "plain", "utf-8"))
+    body_part.attach(MIMEText(html_body, "html", "utf-8"))
+    msg.attach(body_part)
+
+    # Attach DOCX
+    attachment = MIMEApplication(docx_bytes, _subtype="vnd.openxmlformats-officedocument.wordprocessingml.document")
+    attachment.add_header("Content-Disposition", "attachment", filename=("utf-8", "", docx_filename))
+    msg.attach(attachment)
 
     send_params = {
         "FromEmailAddress": SES_FROM_EMAIL,
         "Destination": {"ToAddresses": [email]},
-        "Content": {
-            "Simple": {
-                "Subject": {"Data": f"你嘅會議紀錄已準備好 — {file_name}", "Charset": "UTF-8"},
-                "Body": {
-                    "Html": {
-                        "Data": _build_success_html(minutes_content, download_url, file_name),
-                        "Charset": "UTF-8",
-                    },
-                    "Text": {
-                        "Data": f"會議紀錄 ({file_name}):\n\n{minutes_content}\n\n"
-                        f"下載連結（7日有效）：{download_url}",
-                        "Charset": "UTF-8",
-                    },
-                },
-            },
-        },
+        "Content": {"Raw": {"Data": msg.as_bytes()}},
     }
     if SES_IDENTITY_ARN:
         send_params["FromEmailAddressIdentityArn"] = SES_IDENTITY_ARN
     ses_client.send_email(**send_params)
 
 
+# ---------------------------------------------------------------------------
+# Markdown → DOCX conversion
+# ---------------------------------------------------------------------------
+def _md_to_docx(md_content, file_name):
+    """Convert meeting minutes Markdown to a formatted Word document."""
+    doc = Document()
+
+    # Page margins
+    for section in doc.sections:
+        section.top_margin = Inches(1)
+        section.bottom_margin = Inches(1)
+        section.left_margin = Inches(1.2)
+        section.right_margin = Inches(1.2)
+
+    # Style defaults
+    style = doc.styles["Normal"]
+    style.font.name = "Calibri"
+    style.font.size = Pt(11)
+    style.paragraph_format.space_after = Pt(6)
+
+    for level in range(1, 4):
+        h_style = doc.styles[f"Heading {level}"]
+        h_style.font.color.rgb = RGBColor(0x3a, 0x7f, 0x82)
+
+    lines = md_content.split("\n")
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        stripped = line.strip()
+
+        # Skip empty lines
+        if not stripped:
+            i += 1
+            continue
+
+        # Headings
+        if stripped.startswith("### "):
+            doc.add_heading(stripped[4:], level=3)
+        elif stripped.startswith("## "):
+            doc.add_heading(stripped[3:], level=2)
+        elif stripped.startswith("# "):
+            doc.add_heading(stripped[2:], level=1)
+
+        # Horizontal rule
+        elif stripped in ("---", "***", "___"):
+            p = doc.add_paragraph()
+            p.paragraph_format.space_before = Pt(12)
+            p.paragraph_format.space_after = Pt(12)
+            # Add a thin line via bottom border
+            run = p.add_run("─" * 60)
+            run.font.size = Pt(6)
+            run.font.color.rgb = RGBColor(0xCC, 0xCC, 0xCC)
+
+        # Bullet list
+        elif stripped.startswith("- ") or stripped.startswith("* "):
+            text = stripped[2:]
+            text = _clean_md_inline(text)
+            doc.add_paragraph(text, style="List Bullet")
+
+        # Numbered list
+        elif re.match(r'^\d+\.\s', stripped):
+            text = re.sub(r'^\d+\.\s', '', stripped)
+            text = _clean_md_inline(text)
+            doc.add_paragraph(text, style="List Number")
+
+        # Table (simple markdown table)
+        elif stripped.startswith("|"):
+            table_lines = []
+            while i < len(lines) and lines[i].strip().startswith("|"):
+                table_lines.append(lines[i].strip())
+                i += 1
+            _add_table(doc, table_lines)
+            continue  # skip i += 1 at bottom
+
+        # Regular paragraph
+        else:
+            text = _clean_md_inline(stripped)
+            p = doc.add_paragraph()
+            _add_formatted_runs(p, stripped)
+
+        i += 1
+
+    # Save to bytes
+    with tempfile.NamedTemporaryFile(suffix=".docx", delete=False) as tmp:
+        doc.save(tmp.name)
+        tmp.seek(0)
+        with open(tmp.name, "rb") as f:
+            return f.read()
+
+
+def _clean_md_inline(text):
+    """Remove markdown inline formatting for plain text."""
+    text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)
+    text = re.sub(r'\*(.+?)\*', r'\1', text)
+    text = re.sub(r'`(.+?)`', r'\1', text)
+    return text
+
+
+def _add_formatted_runs(paragraph, text):
+    """Add runs with bold/italic formatting from markdown inline syntax."""
+    # Split on **bold** and *italic* patterns
+    parts = re.split(r'(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`)', text)
+    for part in parts:
+        if part.startswith("**") and part.endswith("**"):
+            run = paragraph.add_run(part[2:-2])
+            run.bold = True
+        elif part.startswith("*") and part.endswith("*"):
+            run = paragraph.add_run(part[1:-1])
+            run.italic = True
+        elif part.startswith("`") and part.endswith("`"):
+            run = paragraph.add_run(part[1:-1])
+            run.font.name = "Consolas"
+            run.font.size = Pt(10)
+            run.font.color.rgb = RGBColor(0x88, 0x44, 0x44)
+        else:
+            paragraph.add_run(part)
+
+
+def _add_table(doc, table_lines):
+    """Parse markdown table lines and add a Word table."""
+    rows = []
+    for line in table_lines:
+        cells = [c.strip() for c in line.strip("|").split("|")]
+        # Skip separator rows (---)
+        if all(re.match(r'^[-:]+$', c) for c in cells):
+            continue
+        rows.append(cells)
+
+    if len(rows) < 1:
+        return
+
+    num_cols = max(len(r) for r in rows)
+    table = doc.add_table(rows=len(rows), cols=num_cols)
+    table.style = "Light Grid Accent 1"
+
+    for r_idx, row_data in enumerate(rows):
+        for c_idx, cell_text in enumerate(row_data):
+            if c_idx < num_cols:
+                cell = table.cell(r_idx, c_idx)
+                cell.text = _clean_md_inline(cell_text)
+                if r_idx == 0:
+                    for run in cell.paragraphs[0].runs:
+                        run.bold = True
+
+
+# ---------------------------------------------------------------------------
+# Failure email (simple, no attachment)
+# ---------------------------------------------------------------------------
 def _extract_error_reason(error):
-    """從 Step Functions error object 提取人睇得明嘅 error message"""
     if not error:
         return "未知錯誤"
     try:
-        # Step Functions Catch 格式: {"Error": "...", "Cause": "..."}
         cause = error.get("Cause", "")
         if isinstance(cause, str):
             try:
@@ -99,25 +277,20 @@ def _extract_error_reason(error):
         else:
             cause_obj = cause
 
-        # Batch job: 從 Container.Reason 提取
         reason = ""
         container = cause_obj.get("Container", {})
         if container.get("Reason"):
             reason = container["Reason"]
-        # 或者從 StatusReason
         elif cause_obj.get("StatusReason"):
             reason = cause_obj["StatusReason"]
-        # Lambda error
         elif cause_obj.get("errorMessage"):
             reason = cause_obj["errorMessage"]
 
         if reason:
-            # 截短太長嘅 error（例如 IAM policy denied 會好長）
             if len(reason) > 300:
                 reason = reason[:300] + "..."
             return reason
 
-        # Fallback: 用 Error type
         error_type = error.get("Error", "")
         if error_type:
             return f"錯誤類型：{error_type}"
@@ -150,27 +323,3 @@ def _send_failure_email(job_id, email, error, file_name):
     if SES_IDENTITY_ARN:
         send_params["FromEmailAddressIdentityArn"] = SES_IDENTITY_ARN
     ses_client.send_email(**send_params)
-
-
-def _build_success_html(minutes, download_url, file_name):
-    # Convert markdown-ish content to basic HTML
-    html_content = minutes.replace("\n", "<br>")
-
-    return f"""
-    <html>
-    <body style="font-family: sans-serif; max-width: 800px; margin: 0 auto; padding: 20px;">
-        <h2>會議紀錄已準備好 — {file_name}</h2>
-        <div style="background: #f5f5f5; padding: 20px; border-radius: 8px; margin: 20px 0;">
-            {html_content}
-        </div>
-        <p>
-            <a href="{download_url}"
-               style="background: #0066cc; color: white; padding: 10px 20px;
-                      text-decoration: none; border-radius: 4px;">
-                下載 Markdown 檔案
-            </a>
-            <br><small>（連結 7 日內有效）</small>
-        </p>
-    </body>
-    </html>
-    """
