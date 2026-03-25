@@ -285,6 +285,38 @@
                 </div>
             </div>
 
+            <!-- ===== Page: Job Detail ===== -->
+            <div class="page" id="page-detail">
+                <div class="detail-card">
+                    <div class="detail-header">
+                        <button class="detail-back" id="detail-back" type="button">← 返回</button>
+                        <h2 class="detail-title" id="detail-title"></h2>
+                        <span class="detail-status" id="detail-status"></span>
+                    </div>
+
+                    <div class="detail-minutes" id="detail-minutes">
+                        <!-- Rendered markdown goes here -->
+                    </div>
+
+                    <div class="detail-actions">
+                        <button class="btn btn--primary" id="detail-download" type="button" data-i18n="downloadDocx">下載 DOCX</button>
+                    </div>
+
+                    <div class="detail-refine">
+                        <h3 data-i18n="refineTitle">調整會議紀錄</h3>
+                        <div class="refine-input-group">
+                            <textarea id="refine-input" rows="3" data-i18n-placeholder="refinePlaceholder" placeholder="例如：加多啲 action items、翻譯做英文、重點講 budget..."></textarea>
+                            <button class="btn btn--primary" id="refine-submit" type="button" data-i18n="refineSubmit">發送</button>
+                        </div>
+                        <div class="refine-loading" id="refine-loading" hidden>
+                            <div class="spinner"></div>
+                            <span data-i18n="refineLoading">AI 正在調整...</span>
+                        </div>
+                        <p class="auth-error" id="refine-error" hidden></p>
+                    </div>
+                </div>
+            </div>
+
             <!-- ===== Page: Settings ===== -->
             <div class="page" id="page-settings">
                 <div class="settings-card">

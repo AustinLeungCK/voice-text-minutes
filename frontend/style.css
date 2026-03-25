@@ -1328,6 +1328,148 @@ textarea:focus {
 }
 
 /* ==========================================================================
+   Detail Page
+   ========================================================================== */
+.detail-card {
+    background: var(--surface-card);
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--border-default);
+    padding: var(--space-8);
+    max-width: 900px;
+    margin: 0 auto;
+}
+
+.detail-header {
+    display: flex;
+    align-items: center;
+    gap: var(--space-4);
+    margin-bottom: var(--space-6);
+    flex-wrap: wrap;
+}
+
+.detail-back {
+    background: none;
+    border: none;
+    color: var(--color-primary-400);
+    cursor: pointer;
+    font-size: 0.9rem;
+    padding: var(--space-2);
+    border-radius: var(--radius-sm);
+    transition: background var(--t-fast);
+}
+
+.detail-back:hover {
+    background: var(--hover-bg);
+}
+
+.detail-title {
+    flex: 1;
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.detail-status {
+    font-size: 0.8rem;
+    padding: var(--space-1) var(--space-3);
+    border-radius: var(--radius-full);
+    background: var(--color-success);
+    color: white;
+}
+
+.detail-minutes {
+    background: var(--surface-ground);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-md);
+    padding: var(--space-6);
+    margin-bottom: var(--space-6);
+    font-size: 0.95rem;
+    line-height: 1.7;
+    max-height: 60vh;
+    overflow-y: auto;
+    color: var(--text-primary);
+}
+
+.detail-minutes h2 { font-size: 1.3rem; margin: var(--space-6) 0 var(--space-3); color: var(--color-primary-500); }
+.detail-minutes h3 { font-size: 1.1rem; margin: var(--space-4) 0 var(--space-2); color: var(--color-primary-400); }
+.detail-minutes h4 { font-size: 1rem; margin: var(--space-3) 0 var(--space-2); }
+.detail-minutes ul, .detail-minutes ol { padding-left: var(--space-6); margin: var(--space-2) 0; }
+.detail-minutes li { margin: var(--space-1) 0; }
+.detail-minutes hr { border: none; border-top: 1px solid var(--border-default); margin: var(--space-4) 0; }
+.detail-minutes table { width: 100%; border-collapse: collapse; margin: var(--space-4) 0; font-size: 0.9rem; }
+.detail-minutes th, .detail-minutes td { padding: var(--space-2) var(--space-3); border: 1px solid var(--border-default); text-align: left; }
+.detail-minutes th { background: var(--surface-card); font-weight: 600; }
+
+.detail-actions {
+    display: flex;
+    gap: var(--space-3);
+    margin-bottom: var(--space-6);
+}
+
+.detail-refine {
+    border-top: 1px solid var(--border-default);
+    padding-top: var(--space-6);
+}
+
+.detail-refine h3 {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: var(--space-3);
+}
+
+.refine-input-group {
+    display: flex;
+    gap: var(--space-3);
+    align-items: flex-start;
+}
+
+.refine-input-group textarea {
+    flex: 1;
+    padding: var(--space-3) var(--space-4);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-md);
+    background: var(--surface-ground);
+    color: var(--text-primary);
+    font-size: 0.95rem;
+    font-family: var(--font-body);
+    resize: vertical;
+    min-height: 80px;
+    transition: border-color var(--t-fast);
+}
+
+.refine-input-group textarea:focus {
+    outline: none;
+    border-color: var(--color-primary-500);
+    box-shadow: var(--shadow-focus);
+}
+
+.refine-loading {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-4);
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+}
+
+.refine-loading[hidden] { display: none; }
+
+.spinner {
+    width: 20px;
+    height: 20px;
+    border: 2px solid var(--border-default);
+    border-top-color: var(--color-primary-500);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ==========================================================================
    Responsive
    ========================================================================== */
 @media (max-width: 768px) {
@@ -1340,4 +1482,7 @@ textarea:focus {
     .wizard-card { padding: var(--space-5); }
     .radio-group { grid-template-columns: 1fr; }
     .login-card { padding: var(--space-8) var(--space-5); }
+    .detail-card { padding: var(--space-4); }
+    .refine-input-group { flex-direction: column; }
+    .detail-minutes { max-height: 50vh; }
 }

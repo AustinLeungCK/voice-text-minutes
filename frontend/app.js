@@ -264,6 +264,14 @@ const I18N = {
         currentPassword: '現有密碼',
         btnChangePassword: '更改密碼',
         passwordChanged: '密碼已更改成功。',
+        downloadDocx: '下載 DOCX',
+        refineTitle: '調整會議紀錄',
+        refinePlaceholder: '例如：加多啲 action items、翻譯做英文、重點講 budget...',
+        refineSubmit: '發送',
+        refineLoading: 'AI 正在調整...',
+        refineSuccess: '會議紀錄已更新。',
+        backToHistory: '← 返回',
+        pageDetail: '會議紀錄詳情',
     },
     en: {
         logoSub: 'Precis',
@@ -352,6 +360,14 @@ const I18N = {
         currentPassword: 'Current Password',
         btnChangePassword: 'Change Password',
         passwordChanged: 'Password changed successfully.',
+        downloadDocx: 'Download DOCX',
+        refineTitle: 'Refine Meeting Minutes',
+        refinePlaceholder: 'e.g. Add more action items, translate to English, focus on budget...',
+        refineSubmit: 'Send',
+        refineLoading: 'AI is refining...',
+        refineSuccess: 'Meeting minutes updated.',
+        backToHistory: '← Back',
+        pageDetail: 'Meeting Minutes Detail',
     },
 };
 
@@ -677,6 +693,11 @@ async function loadHistory() {
             badge.className = `history-item__badge history-item__badge--${statusClass}`;
             badge.textContent = statusText;
 
+            if (job.status === 'completed') {
+                item.style.cursor = 'pointer';
+                item.addEventListener('click', () => showJobDetail(job.job_id, job.file_name));
+            }
+
             item.appendChild(statusDot);
             item.appendChild(body);
             item.appendChild(badge);
@@ -686,6 +707,54 @@ async function loadHistory() {
         listEl.innerHTML = '';
         emptyEl.hidden = false;
     }
+}
+
+// --- Job Detail ---
+let currentDetailJobId = null;
+
+async function showJobDetail(jobId, fileName) {
+    currentDetailJobId = jobId;
+    document.getElementById('detail-title').textContent = fileName || jobId;
+    document.getElementById('detail-minutes').innerHTML = '<p>Loading...</p>';
+    document.getElementById('refine-input').value = '';
+    document.getElementById('refine-error').hidden = true;
+
+    showPage('detail');
+
+    // Fetch the meeting minutes markdown from API
+    try {
+        const res = await fetch(`${CONFIG.API_URL}/jobs/${jobId}`, {
+            headers: { 'Authorization': currentUser?.token || '' }
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+
+        // Simple markdown to HTML rendering (basic)
+        const html = simpleMarkdownToHtml(data.minutes || 'No content available');
+        document.getElementById('detail-minutes').innerHTML = html;
+    } catch (err) {
+        document.getElementById('detail-minutes').innerHTML = '<p>Failed to load minutes.</p>';
+    }
+}
+
+function simpleMarkdownToHtml(md) {
+    return md
+        .replace(/^### (.+)$/gm, '<h4>$1</h4>')
+        .replace(/^## (.+)$/gm, '<h3>$1</h3>')
+        .replace(/^# (.+)$/gm, '<h2>$1</h2>')
+        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+        .replace(/\*(.+?)\*/g, '<em>$1</em>')
+        .replace(/^\* (.+)$/gm, '<li>$1</li>')
+        .replace(/^- (.+)$/gm, '<li>$1</li>')
+        .replace(/^\d+\. (.+)$/gm, '<li>$1</li>')
+        .replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>')
+        .replace(/^---$/gm, '<hr>')
+        .replace(/\n\n/g, '</p><p>')
+        .replace(/\n/g, '<br>')
+        .replace(/^(.+)$/gm, function(match) {
+            if (match.startsWith('<')) return match;
+            return match;
+        });
 }
 
 // --- Utility ---
@@ -853,6 +922,49 @@ function initEventListeners() {
             errEl.textContent = err.message;
             errEl.hidden = false;
         }
+    });
+
+    // Detail page — back button
+    document.getElementById('detail-back').addEventListener('click', () => showPage('history'));
+
+    // Detail page — refine submit
+    document.getElementById('refine-submit').addEventListener('click', async () => {
+        const instruction = document.getElementById('refine-input').value.trim();
+        if (!instruction) return;
+
+        const errEl = document.getElementById('refine-error');
+        const loadingEl = document.getElementById('refine-loading');
+        errEl.hidden = true;
+        loadingEl.hidden = false;
+        document.getElementById('refine-submit').disabled = true;
+
+        try {
+            const res = await fetch(`${CONFIG.API_URL}/jobs/${currentDetailJobId}/refine`, {
+                method: 'POST',
+                headers: authHeaders(),
+                body: JSON.stringify({ instruction }),
+            });
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.error || `HTTP ${res.status}`);
+            }
+            const data = await res.json();
+            document.getElementById('detail-minutes').innerHTML = simpleMarkdownToHtml(data.minutes);
+            document.getElementById('refine-input').value = '';
+        } catch (err) {
+            errEl.textContent = err.message;
+            errEl.hidden = false;
+        } finally {
+            loadingEl.hidden = true;
+            document.getElementById('refine-submit').disabled = false;
+        }
+    });
+
+    // Detail page — download DOCX
+    document.getElementById('detail-download').addEventListener('click', async () => {
+        // For now, just open the API endpoint that returns the DOCX
+        // This will be implemented when the download endpoint exists
+        showError('Download feature coming soon');
     });
 
     // Logout buttons

@@ -23,26 +23,8 @@ dynamodb = boto3.resource("dynamodb")
 JOBS_TABLE = os.environ["JOBS_TABLE"]
 DATA_BUCKET = os.environ["DATA_BUCKET"]
 SES_FROM_EMAIL = os.environ["SES_FROM_EMAIL"]
-SES_IDENTITY_ARN = os.environ.get("SES_IDENTITY_ARN", "")
-SES_ROLE_ARN = os.environ.get("SES_ROLE_ARN", "")
 
-
-def _get_ses_client():
-    """Return an SES client, optionally assuming a cross-account role."""
-    if SES_ROLE_ARN:
-        sts = boto3.client("sts")
-        creds = sts.assume_role(
-            RoleArn=SES_ROLE_ARN,
-            RoleSessionName="precis-notify",
-        )["Credentials"]
-        return boto3.client(
-            "sesv2",
-            region_name=os.environ.get("SES_REGION", "ap-southeast-1"),
-            aws_access_key_id=creds["AccessKeyId"],
-            aws_secret_access_key=creds["SecretAccessKey"],
-            aws_session_token=creds["SessionToken"],
-        )
-    return boto3.client("sesv2", region_name=os.environ.get("SES_REGION", "ap-southeast-1"))
+ses_client = boto3.client("sesv2", region_name=os.environ.get("SES_REGION", "ap-southeast-1"))
 
 
 def lambda_handler(event, context):
@@ -129,9 +111,7 @@ def _send_success_email(job_id, email, file_name):
         "Destination": {"ToAddresses": [email]},
         "Content": {"Raw": {"Data": msg.as_bytes()}},
     }
-    if SES_IDENTITY_ARN and not SES_ROLE_ARN:
-        send_params["FromEmailAddressIdentityArn"] = SES_IDENTITY_ARN
-    _get_ses_client().send_email(**send_params)
+    ses_client.send_email(**send_params)
 
 
 # ---------------------------------------------------------------------------
@@ -338,6 +318,4 @@ def _send_failure_email(job_id, email, error, file_name):
             },
         },
     }
-    if SES_IDENTITY_ARN and not SES_ROLE_ARN:
-        send_params["FromEmailAddressIdentityArn"] = SES_IDENTITY_ARN
-    _get_ses_client().send_email(**send_params)
+    ses_client.send_email(**send_params)

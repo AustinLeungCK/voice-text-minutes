@@ -507,6 +507,37 @@ Resources:
             Path: /jobs/{job_id}
             Method: get
 
+  RefineFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: prod-voice-meeting-minutes-refine
+      Handler: handler.lambda_handler
+      CodeUri: lambdas/refine/
+      Timeout: 120
+      MemorySize: 256
+      Policies:
+        - S3CrudPolicy:
+            BucketName: !Ref DataBucket
+        - DynamoDBCrudPolicy:
+            TableName: !Ref JobsTable
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+              Resource: "*"
+              Condition:
+                StringEquals:
+                  "aws:RequestedRegion":
+                    - "ap-northeast-1"
+      Events:
+        RefineMinutes:
+          Type: Api
+          Properties:
+            RestApiId: !Ref MeetingApi
+            Path: /jobs/{job_id}/refine
+            Method: post
+
   # ---------------------------------------------------------------------------
   # Scheduled Lambda — Cleanup orphan uploads (status=uploaded > 24h)
   # ---------------------------------------------------------------------------
