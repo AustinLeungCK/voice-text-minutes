@@ -52,8 +52,14 @@ def _send_success_email(job_id, email, file_name):
     resp = s3_client.get_object(Bucket=DATA_BUCKET, Key=key)
     md_content = resp["Body"].read().decode("utf-8")
 
-    # Build DOCX
+    # Build DOCX and save to S3 for download
     docx_bytes = _md_to_docx(md_content, file_name)
+    s3_client.put_object(
+        Bucket=DATA_BUCKET,
+        Key=f"jobs/{job_id}/meeting_minutes.docx",
+        Body=docx_bytes,
+        ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    )
 
     # Build display name from file_name (strip extension + timestamp)
     display_name = re.sub(r'-\d{8}_\d{6}-.*$', '', file_name)

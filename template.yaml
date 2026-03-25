@@ -438,7 +438,7 @@ Resources:
       CodeUri: lambdas/notify/
       Timeout: 60
       Policies:
-        - S3ReadPolicy:
+        - S3CrudPolicy:
             BucketName: !Ref DataBucket
         - DynamoDBCrudPolicy:
             TableName: !Ref JobsTable
