@@ -324,7 +324,7 @@ Resources:
       StageName: prod
       Cors:
         AllowOrigin: "'https://minutes.msphk.info'"
-        AllowMethods: "'GET,POST,OPTIONS'"
+        AllowMethods: "'GET,POST,DELETE,OPTIONS'"
         AllowHeaders: "'Content-Type,X-Api-Key,Authorization'"
       Auth:
         DefaultAuthorizer: CognitoAuth
@@ -521,6 +521,56 @@ Resources:
             RestApiId: !Ref MeetingApi
             Path: /jobs/{job_id}/refine
             Method: post
+
+  # ---------------------------------------------------------------------------
+  # Lambda — Admin User Management (Cognito)
+  # ---------------------------------------------------------------------------
+  AdminUsersFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: prod-voice-meeting-minutes-admin-users
+      Handler: handler.lambda_handler
+      CodeUri: lambdas/admin_users/
+      Timeout: 30
+      Environment:
+        Variables:
+          COGNITO_USER_POOL_ID: ap-east-1_6BilvzaAu
+      Policies:
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - cognito-idp:AdminCreateUser
+                - cognito-idp:AdminSetUserPassword
+                - cognito-idp:AdminDeleteUser
+                - cognito-idp:ListUsers
+              Resource: !Sub "arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/ap-east-1_6BilvzaAu"
+            - Effect: Allow
+              Action:
+                - ses:VerifyEmailIdentity
+              Resource: "*"
+              Condition:
+                StringEquals:
+                  "aws:RequestedRegion": "ap-southeast-1"
+      Events:
+        CreateUser:
+          Type: Api
+          Properties:
+            RestApiId: !Ref MeetingApi
+            Path: /admin/users
+            Method: post
+        ListUsers:
+          Type: Api
+          Properties:
+            RestApiId: !Ref MeetingApi
+            Path: /admin/users
+            Method: get
+        DeleteUser:
+          Type: Api
+          Properties:
+            RestApiId: !Ref MeetingApi
+            Path: /admin/users
+            Method: delete
 
   # ---------------------------------------------------------------------------
   # Scheduled Lambda — Cleanup orphan uploads (status=uploaded > 24h)

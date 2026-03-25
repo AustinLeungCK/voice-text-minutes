@@ -348,6 +348,26 @@
                     </form>
 
                     <hr class="settings-divider">
+                    <div id="admin-section" hidden>
+                        <h3 class="settings-section-title" data-i18n="adminTitle">用戶管理</h3>
+                        <form id="admin-add-user-form" autocomplete="off">
+                            <div class="form-group">
+                                <label for="admin-new-email" data-i18n="adminEmail">新用戶 Email</label>
+                                <input type="email" id="admin-new-email" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="admin-new-password" data-i18n="adminPassword">密碼</label>
+                                <input type="password" id="admin-new-password" required>
+                            </div>
+                            <p class="auth-hint" data-i18n="passwordHint">最少 8 個字，需要大小寫同數字</p>
+                            <p class="auth-error" id="admin-error" hidden></p>
+                            <p class="auth-success" id="admin-success" hidden></p>
+                            <button type="submit" class="btn btn--primary" data-i18n="adminAddUser">新增用戶</button>
+                        </form>
+                        <div id="admin-user-list" style="margin-top: 1.5rem;"></div>
+                    </div>
+
+                    <hr class="settings-divider">
                     <button class="btn btn--secondary" id="settings-logout" type="button" data-i18n="btnLogout">登出</button>
                 </div>
             </div>

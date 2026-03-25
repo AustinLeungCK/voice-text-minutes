@@ -173,6 +173,14 @@ function showApp() {
 
     // Settings 頁面顯示 email
     document.getElementById('settings-email').textContent = currentUser.email;
+
+    // Admin section — only visible to admin user
+    if (currentUser?.email === 'austin.leung@ecloudvalley.com') {
+        document.getElementById('admin-section').hidden = false;
+        loadAdminUsers();
+    } else {
+        document.getElementById('admin-section').hidden = true;
+    }
 }
 
 function showLogin() {
@@ -285,6 +293,13 @@ const I18N = {
         refineSuccess: '會議紀錄已更新。',
         backToHistory: '← 返回',
         pageDetail: '會議紀錄詳情',
+        adminTitle: '用戶管理',
+        adminEmail: '新用戶 Email',
+        adminPassword: '密碼',
+        adminAddUser: '新增用戶',
+        adminUserAdded: '用戶已新增',
+        adminDeleteConfirm: '確定要刪除呢個用戶？',
+        adminDelete: '刪除',
     },
     en: {
         logoSub: 'Precis',
@@ -382,6 +397,13 @@ const I18N = {
         refineSuccess: 'Meeting minutes updated.',
         backToHistory: '← Back',
         pageDetail: 'Meeting Minutes Detail',
+        adminTitle: 'User Management',
+        adminEmail: 'New User Email',
+        adminPassword: 'Password',
+        adminAddUser: 'Add User',
+        adminUserAdded: 'User added successfully',
+        adminDeleteConfirm: 'Delete this user?',
+        adminDelete: 'Delete',
     },
 };
 
@@ -766,6 +788,15 @@ async function showJobDetail(jobId, fileName) {
         // Simple markdown to HTML rendering (basic)
         const html = simpleMarkdownToHtml(data.minutes || 'No content available');
         document.getElementById('detail-minutes').innerHTML = html;
+
+        // Show download button if DOCX is available
+        const dlBtn = document.getElementById('detail-download');
+        if (data.docx_url) {
+            dlBtn.style.display = '';
+            dlBtn.onclick = () => window.open(data.docx_url, '_blank');
+        } else {
+            dlBtn.style.display = 'none';
+        }
     } catch (err) {
         document.getElementById('detail-minutes').innerHTML = '<p>Failed to load minutes.</p>';
     }
@@ -1004,13 +1035,128 @@ function initEventListeners() {
         }
     });
 
-    // Detail page — download DOCX: hidden because there is no presigned-URL
-    // download endpoint yet. Users already receive the DOCX via email (SES).
-    document.getElementById('detail-download').style.display = 'none';
+    // Detail page — download DOCX (visibility controlled in showJobDetail based on docx_url)
+
+    // Admin — add user form
+    document.getElementById('admin-add-user-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const errEl = document.getElementById('admin-error');
+        const successEl = document.getElementById('admin-success');
+        errEl.hidden = true;
+        successEl.hidden = true;
+
+        const email = document.getElementById('admin-new-email').value.trim();
+        const password = document.getElementById('admin-new-password').value;
+
+        try {
+            const res = await apiFetch(`${CONFIG.API_URL}/admin/users`, {
+                method: 'POST',
+                headers: authHeaders(),
+                body: JSON.stringify({ email, password }),
+            });
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.error || `HTTP ${res.status}`);
+            }
+            successEl.textContent = t('adminUserAdded');
+            successEl.hidden = false;
+            document.getElementById('admin-add-user-form').reset();
+            loadAdminUsers();
+        } catch (err) {
+            errEl.textContent = err.message;
+            errEl.hidden = false;
+        }
+    });
 
     // Logout buttons
     document.getElementById('btn-logout').addEventListener('click', logout);
     document.getElementById('settings-logout').addEventListener('click', logout);
+}
+
+// --- Admin User Management ---
+async function loadAdminUsers() {
+    if (!CONFIG.API_URL || !currentUser) return;
+    const listEl = document.getElementById('admin-user-list');
+    listEl.textContent = '';
+
+    try {
+        const res = await apiFetch(`${CONFIG.API_URL}/admin/users`, {
+            headers: authHeaders(),
+        });
+        if (!res.ok) {
+            if (res.status === 403) return;
+            throw new Error(`HTTP ${res.status}`);
+        }
+        const users = await res.json();
+        if (!Array.isArray(users) || users.length === 0) return;
+
+        const table = document.createElement('table');
+        table.style.cssText = 'width:100%;border-collapse:collapse;font-size:0.95rem;';
+
+        const thead = document.createElement('thead');
+        const headerRow = document.createElement('tr');
+        ['Email', 'Status', t('adminDelete')].forEach(text => {
+            const th = document.createElement('th');
+            th.textContent = text;
+            th.style.cssText = 'text-align:left;padding:0.5rem 0.75rem;border-bottom:2px solid var(--color-border, #ddd);';
+            headerRow.appendChild(th);
+        });
+        thead.appendChild(headerRow);
+        table.appendChild(thead);
+
+        const tbody = document.createElement('tbody');
+        users.forEach(user => {
+            const tr = document.createElement('tr');
+
+            const tdEmail = document.createElement('td');
+            tdEmail.textContent = user.email;
+            tdEmail.style.cssText = 'padding:0.5rem 0.75rem;border-bottom:1px solid var(--color-border, #eee);';
+
+            const tdStatus = document.createElement('td');
+            tdStatus.textContent = user.status;
+            tdStatus.style.cssText = 'padding:0.5rem 0.75rem;border-bottom:1px solid var(--color-border, #eee);';
+
+            const tdAction = document.createElement('td');
+            tdAction.style.cssText = 'padding:0.5rem 0.75rem;border-bottom:1px solid var(--color-border, #eee);';
+
+            // Don't show delete button for admin user
+            if (user.email !== 'austin.leung@ecloudvalley.com') {
+                const delBtn = document.createElement('button');
+                delBtn.className = 'btn btn--secondary';
+                delBtn.textContent = t('adminDelete');
+                delBtn.style.cssText = 'padding:0.25rem 0.75rem;font-size:0.85rem;';
+                delBtn.addEventListener('click', () => deleteAdminUser(user.email));
+                tdAction.appendChild(delBtn);
+            }
+
+            tr.appendChild(tdEmail);
+            tr.appendChild(tdStatus);
+            tr.appendChild(tdAction);
+            tbody.appendChild(tr);
+        });
+        table.appendChild(tbody);
+        listEl.appendChild(table);
+    } catch {
+        // Silently fail — admin section is optional
+    }
+}
+
+async function deleteAdminUser(email) {
+    if (!confirm(t('adminDeleteConfirm'))) return;
+    try {
+        const res = await apiFetch(`${CONFIG.API_URL}/admin/users`, {
+            method: 'DELETE',
+            headers: authHeaders(),
+            body: JSON.stringify({ email }),
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || `HTTP ${res.status}`);
+        }
+        loadAdminUsers();
+    } catch (err) {
+        showError(err.message);
+    }
 }
 
 // --- Init ---

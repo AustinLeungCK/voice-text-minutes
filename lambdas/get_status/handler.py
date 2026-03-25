@@ -40,7 +40,7 @@ def lambda_handler(event, context):
         "error_message": item.get("error_message"),
     }
 
-    # Include meeting minutes content for completed/refined jobs
+    # Include meeting minutes content + DOCX download URL for completed/refined jobs
     if item.get("status") in ("completed", "refined"):
         try:
             resp = s3_client.get_object(
@@ -50,6 +50,18 @@ def lambda_handler(event, context):
             response_body["minutes"] = resp["Body"].read().decode("utf-8")
         except s3_client.exceptions.NoSuchKey:
             response_body["minutes"] = ""
+
+        # Generate presigned URL for DOCX download (1 hour expiry)
+        docx_key = f"jobs/{job_id}/meeting_minutes.docx"
+        try:
+            s3_client.head_object(Bucket=DATA_BUCKET, Key=docx_key)
+            response_body["docx_url"] = s3_client.generate_presigned_url(
+                "get_object",
+                Params={"Bucket": DATA_BUCKET, "Key": docx_key},
+                ExpiresIn=3600,
+            )
+        except s3_client.exceptions.ClientError:
+            pass
 
     return _response(200, response_body)
 
