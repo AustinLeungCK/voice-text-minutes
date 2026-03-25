@@ -216,7 +216,7 @@ python transcribe.py recordings/meeting.mp4 --output output/meeting_minutes.md
 # === AWS SAM ===
 export PATH="$LOCALAPPDATA/Programs/Python/Python312:$PATH"
 sam build --profile 0362 --region ap-east-1
-sam deploy --profile 0362 --region ap-east-1 --parameter-overrides "ProcessorAmiId=ami-031e7d8cb5001a0b4"
+sam deploy --profile 0362 --region ap-east-1
 sam validate --profile 0362 --region ap-east-1
 
 # === CodeBuild（build processor container）===

@@ -20,16 +20,9 @@ Parameters:
     Description: ECR image URI for processor container (update after first push)
 
   ProcessorAmiId:
-    Type: String
-    Default: "ami-031e7d8cb5001a0b4"
-    Description: Custom AMI ID with pre-baked ML models (from EC2 Image Builder). Leave empty to use default ECS-optimized AMI.
-
-
-# =============================================================================
-# Conditions
-# =============================================================================
-Conditions:
-  HasCustomAmi: !Not [!Equals [!Ref ProcessorAmiId, ""]]
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: "/precis/processor-ami-id"
+    Description: SSM parameter path for processor AMI ID (auto-updated by Image Builder)
 
 # =============================================================================
 # Globals
@@ -783,7 +776,7 @@ Resources:
           - g4dn.xlarge
         Ec2Configuration:
           - ImageType: ECS_AL2023_NVIDIA
-            ImageIdOverride: !If [HasCustomAmi, !Ref ProcessorAmiId, !Ref "AWS::NoValue"]
+            ImageIdOverride: !Ref ProcessorAmiId
         Subnets:
           - !Ref PublicSubnet1a
           - !Ref PublicSubnet1b

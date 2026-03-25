@@ -107,7 +107,7 @@ python transcribe.py recordings/meeting.mp4 --output output/meeting_minutes.md
 # Build + Deploy
 export PATH="$LOCALAPPDATA/Programs/Python/Python312:$PATH"
 sam build --profile 0362 --region ap-east-1
-sam deploy --profile 0362 --region ap-east-1 --parameter-overrides "ProcessorAmiId=ami-031e7d8cb5001a0b4"
+sam deploy --profile 0362 --region ap-east-1
 
 # Build processor container (after code changes)
 aws codebuild start-build \
