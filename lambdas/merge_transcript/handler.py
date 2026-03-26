@@ -44,9 +44,7 @@ def lambda_handler(event, context):
     if slide_contents:
         transcript_parts.append("=== SLIDE CONTENTS ===")
         for slide in slide_contents:
-            transcript_parts.append(
-                f"[Slide at {_format_time(slide.get('timestamp', 0))}]"
-            )
+            transcript_parts.append(f"[Slide {slide.get('slide_index', 0) + 1}]")
             transcript_parts.append(slide.get("text", ""))
             transcript_parts.append("")
 
@@ -80,6 +78,9 @@ def _load_json(bucket, key):
     except s3_client.exceptions.NoSuchKey:
         print(f"Warning: {key} not found, returning empty")
         return {}
+    except (json.JSONDecodeError, ValueError) as e:
+        print(f"Warning: {key} has invalid JSON ({e}), returning empty")
+        return {}
 
 
 def _find_speaker(start, end, speaker_segments):
@@ -91,9 +92,15 @@ def _find_speaker(start, end, speaker_segments):
 
 
 def _resolve_speaker_name(speaker_label, participant_names):
+    """Map pyannote speaker labels to participant names.
+
+    NOTE: This uses index-based mapping (SPEAKER_00 → names[0]) which assumes
+    pyannote's label order matches OCR name order. In practice pyannote orders
+    by first-speech time while OCR orders by screen position — so mappings may
+    be incorrect. A proper fix requires voice enrollment or manual mapping UI.
+    """
     if not participant_names or speaker_label == "UNKNOWN":
         return speaker_label
-    # Map SPEAKER_00 → index 0, etc.
     try:
         idx = int(speaker_label.replace("SPEAKER_", ""))
         if idx < len(participant_names):

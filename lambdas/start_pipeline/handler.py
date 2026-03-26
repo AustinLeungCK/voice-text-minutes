@@ -44,7 +44,10 @@ def lambda_handler(event, context):
         sfn_client.start_execution(
             stateMachineArn=STATE_MACHINE_ARN,
             name=f"job-{job_id}",
-            input=json.dumps({"job_id": job_id}),
+            input=json.dumps({
+                "job_id": job_id,
+                "s3_bucket": detail.get("bucket", {}).get("name", ""),
+            }),
         )
     except sfn_client.exceptions.ExecutionAlreadyExists:
         print(

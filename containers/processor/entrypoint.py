@@ -1,6 +1,6 @@
 """
 Processor container entrypoint.
-Runs on AWS Batch g4dn.xlarge (T4 16GB GPU + 4 vCPU + 16GB RAM).
+Runs on AWS Batch g6.xlarge (L4 24GB) or g4dn.xlarge (T4 16GB) Spot.
 
 Flow:
 1. Download MP4 from S3
@@ -90,6 +90,11 @@ def _download_result(name):
 
 def main():
     print(f"Starting processor for job {JOB_ID}")
+
+    # Early exit if all GPU stages already checkpointed (retry fast path)
+    if all(_checkpoint_exists(s) for s in ("whisper", "ocr", "diarize")):
+        print("All checkpoints found — nothing to do, exiting.")
+        return
 
     # Step 1: Download MP4
     mp4_path = WORK_DIR / "input.mp4"

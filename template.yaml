@@ -446,10 +446,6 @@ Resources:
               Action:
                 - bedrock:InvokeModel
               Resource: "*"
-              Condition:
-                StringEquals:
-                  "aws:RequestedRegion":
-                    - "ap-northeast-2"
 
   NotifyFunction:
     Type: AWS::Serverless::Function
@@ -531,10 +527,6 @@ Resources:
               Action:
                 - bedrock:InvokeModel
               Resource: "*"
-              Condition:
-                StringEquals:
-                  "aws:RequestedRegion":
-                    - "ap-northeast-2"
       Events:
         RefineMinutes:
           Type: Api
@@ -669,6 +661,8 @@ Resources:
             FunctionName: !Ref NotifyFunction
         - DynamoDBCrudPolicy:
             TableName: !Ref JobsTable
+        - S3ReadPolicy:
+            BucketName: !Ref DataBucket
         - Version: "2012-10-17"
           Statement:
             - Effect: Allow
@@ -862,8 +856,7 @@ Resources:
         MaxvCpus: 4  # CLI set to 12, update via CF after jobs drain
         DesiredvCpus: 0
         InstanceTypes:
-          - g6.xlarge      # L4 24GB — primary
-          - g4dn.xlarge    # T4 16GB — fallback
+          - g6.xlarge      # L4 24GB
         Ec2Configuration:
           - ImageType: ECS_AL2023_NVIDIA
             ImageIdOverride: !Ref ProcessorAmiId

@@ -71,7 +71,7 @@ def lambda_handler(event, context):
     except s3_client.exceptions.NoSuchKey:
         return _response(404, {"error": "Meeting minutes not found"})
 
-    # --- Call Bedrock Claude Sonnet 4.6 ---
+    # --- Call Bedrock Claude Sonnet 4.5 ---
     user_message = (
         f"原始轉錄稿：\n{transcript}\n\n"
         f"現有會議紀錄：\n{current_minutes}\n\n"
@@ -81,7 +81,7 @@ def lambda_handler(event, context):
 
     try:
         response = bedrock.invoke_model(
-            modelId="anthropic.claude-sonnet-4-6-20250514-v1:0",
+            modelId="global.anthropic.claude-sonnet-4-5-20250929-v1:0",
             body=json.dumps({
                 "anthropic_version": "bedrock-2023-05-31",
                 "system": SYSTEM_PROMPT,

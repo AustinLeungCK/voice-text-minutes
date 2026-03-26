@@ -14,7 +14,7 @@ bedrock = boto3.client("bedrock-runtime", region_name=os.environ.get("BEDROCK_RE
 
 JOBS_TABLE = os.environ["JOBS_TABLE"]
 
-# Claude Sonnet 4.6 has 200K context. Most 1-hour meetings produce
+# Claude Sonnet 4.5 has 200K context. Most 1-hour meetings produce
 # 50K-80K tokens, so chunking is rarely needed.
 MAX_TRANSCRIPT_CHARS = 500_000  # ~125K tokens, safe for 200K context
 CHUNK_SIZE_CHARS = 200_000
@@ -150,7 +150,7 @@ def _call_claude(system_prompt, transcript, max_tokens=4096, custom_instructions
 
     try:
         response = bedrock.invoke_model(
-            modelId="anthropic.claude-sonnet-4-6-20250514-v1:0",
+            modelId="global.anthropic.claude-sonnet-4-5-20250929-v1:0",
             body=json.dumps({
                 "anthropic_version": "bedrock-2023-05-31",
                 "system": system_prompt,
